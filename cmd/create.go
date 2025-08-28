@@ -1,6 +1,8 @@
 package cmd
 
 import (
+	"errors"
+
 	"github.com/go-sphere/sphere-cli/internal/create"
 	"github.com/spf13/cobra"
 )
@@ -20,7 +22,7 @@ func init() {
 
 	createCmd.RunE = func(cmd *cobra.Command, args []string) error {
 		if *name == "" {
-			return cmd.Usage()
+			return errors.New("--name is required")
 		}
 		if *module == "" {
 			module = name // Default to the project name if no module is specified

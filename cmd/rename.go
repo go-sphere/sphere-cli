@@ -1,6 +1,8 @@
 package cmd
 
 import (
+	"errors"
+
 	"github.com/go-sphere/sphere-cli/internal/renamer"
 	"github.com/spf13/cobra"
 )
@@ -21,7 +23,7 @@ func init() {
 
 	renameCmd.RunE = func(cmd *cobra.Command, args []string) error {
 		if *oldMod == "" || *newMod == "" {
-			return cmd.Usage()
+			return errors.New("--old and --new are required")
 		}
 		return renamer.RenameDirModule(*oldMod, *newMod, *target)
 	}

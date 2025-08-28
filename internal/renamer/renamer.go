@@ -17,7 +17,6 @@ func RenameDirModule(oldModule, newModule string, dir string) error {
 			return nil
 		}
 		if strings.HasSuffix(path, ".go") {
-			log.Printf("rename file: %s", path)
 			return RenameModule(oldModule, newModule, path)
 		}
 		return nil

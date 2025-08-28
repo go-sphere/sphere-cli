@@ -1,6 +1,8 @@
 package cmd
 
 import (
+	"errors"
+
 	"github.com/go-sphere/sphere-cli/internal/service"
 	"github.com/spf13/cobra"
 )
@@ -34,7 +36,7 @@ func init() {
 		pkg := flag.String("package", "dash.v1", "Package name for the generated proto code")
 		serviceProtoCmd.RunE = func(cmd *cobra.Command, args []string) error {
 			if *name == "" || *pkg == "" {
-				return cmd.Usage()
+				return errors.New("--name and --package are required")
 			}
 			text, err := service.GenServiceProto(*name, *pkg)
 			if err != nil {
@@ -51,7 +53,7 @@ func init() {
 		mod := flag.String("mod", "github.com/go-sphere/sphere-layout", "Go module path for the generated code")
 		serviceGolangCmd.RunE = func(cmd *cobra.Command, args []string) error {
 			if *name == "" || *pkg == "" {
-				return cmd.Usage()
+				return errors.New("--name and --package are required")
 			}
 			text, err := service.GenServiceGolang(*name, *pkg, *mod)
 			if err != nil {

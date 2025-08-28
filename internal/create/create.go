@@ -13,9 +13,9 @@ import (
 
 const (
 	sphereModule                = "github.com/go-sphere/sphere"
-	defaultProjectLayout        = "https://github.com/go-sphere/sphere/archive/refs/heads/master.zip"
+	defaultProjectLayout        = "https://github.com/go-sphere/sphere-layout/archive/refs/heads/master.zip"
 	defaultProjectLayoutModName = "github.com/go-sphere/sphere-layout"
-	defaultLayoutPath           = ""
+	defaultLayoutPath           = "sphere-layout-master"
 )
 
 func Project(name, mod string) error {
@@ -72,23 +72,8 @@ func initGitRepo(target string) error {
 }
 
 func renameGoModule(oldModName, newModName, target string) error {
-	err := execCommands(target,
-		[]string{"go", "mod", "edit", "-module", newModName},
-		[]string{"go", "mod", "edit", "-dropreplace", sphereModule},
-	)
-	if err != nil {
-		return err
-	}
 	log.Printf("rename module: %s -> %s", oldModName, newModName)
-	err = renamer.RenameDirModule(oldModName, newModName, target)
-	if err != nil {
-		return err
-	}
-	err = execCommands(target,
-		[]string{"go", "get", sphereModule + "@latest"},
-		[]string{"go", "mod", "tidy"},
-		[]string{"go", "fmt", "./..."},
-	)
+	err := renamer.RenameDirModule(oldModName, newModName, target)
 	if err != nil {
 		return err
 	}
@@ -102,14 +87,20 @@ func renameGoModule(oldModName, newModName, target string) error {
 			return e
 		}
 	}
-	_, err = execCommand(target, "make", "init")
+	err = execCommands(target,
+		[]string{"go", "mod", "edit", "-module", newModName},
+		[]string{"make", "init"},
+		[]string{"go", "mod", "tidy"},
+		[]string{"go", "fmt", "./..."},
+	)
 	if err != nil {
-		log.Printf("make init failed: %v", err)
+		return err
 	}
 	return nil
 }
 
 func execCommand(dir string, name string, arg ...string) (string, error) {
+	log.Println(name, strings.Join(arg, " "))
 	cmd := exec.Command(name, arg...)
 	cmd.Dir = dir
 	var stdout strings.Builder
