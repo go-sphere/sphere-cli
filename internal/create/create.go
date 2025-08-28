@@ -12,10 +12,10 @@ import (
 )
 
 const (
-	sphereModule                = "github.com/TBXark/sphere"
-	defaultProjectLayout        = "https://github.com/TBXark/sphere/archive/refs/heads/master.zip"
-	defaultProjectLayoutModName = "github.com/TBXark/sphere/layout"
-	defaultLayoutPath           = "sphere-master/layout"
+	sphereModule                = "github.com/go-sphere/sphere"
+	defaultProjectLayout        = "https://github.com/go-sphere/sphere/archive/refs/heads/master.zip"
+	defaultProjectLayoutModName = "github.com/go-sphere/sphere-layout"
+	defaultLayoutPath           = ""
 )
 
 func Project(name, mod string) error {

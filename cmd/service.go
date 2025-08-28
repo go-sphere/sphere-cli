@@ -48,7 +48,7 @@ func init() {
 		flag := serviceGolangCmd.Flags()
 		name := flag.String("name", "", "Name of the service")
 		pkg := flag.String("package", "dash.v1", "Package name for the generated Go code")
-		mod := flag.String("mod", "github.com/TBXark/sphere/layout", "Go module path for the generated code")
+		mod := flag.String("mod", "github.com/go-sphere/sphere-layout", "Go module path for the generated code")
 		serviceGolangCmd.RunE = func(cmd *cobra.Command, args []string) error {
 			if *name == "" || *pkg == "" {
 				return cmd.Usage()

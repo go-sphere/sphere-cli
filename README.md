@@ -1,6 +1,6 @@
 # Sphere CLI
 
-Sphere CLI (`sphere-cli`) is a command-line tool designed to streamline the development of [Sphere](https://github.com/TBXark/sphere) projects. It helps you create new projects, generate service code, manage Protobuf definitions, and perform other common development tasks.
+Sphere CLI (`sphere-cli`) is a command-line tool designed to streamline the development of [Sphere](https://github.com/go-sphere/sphere) projects. It helps you create new projects, generate service code, manage Protobuf definitions, and perform other common development tasks.
 
 
 ## Installation
@@ -8,7 +8,7 @@ Sphere CLI (`sphere-cli`) is a command-line tool designed to streamline the deve
 To install `sphere-cli`, ensure you have Go installed and run the following command:
 
 ```shell
-go install github.com/TBXark/sphere/cmd/sphere-cli@latest
+go install github.com/go-sphere/sphere-cli@latest
 ```
 
 
@@ -102,13 +102,13 @@ sphere-cli service golang --name <service-name> [--package <package-name>] [--mo
 **Flags:**
 - `--name string`: (Required) The name of the service.
 - `--package string`: The package name for the generated Go code (default: `dash.v1`).
-- `--mod string`: The Go module path for the generated code (default: `github.com/TBXark/sphere/layout`).
+- `--mod string`: The Go module path for the generated code (default: `github.com/go-sphere/sphere-layout`).
 
 ---
 
 ### `retags`
 
-> Deprecated: Use [`protoc-gen-sphere-binding`](../protoc-gen-sphere-binding/README.md) instead.
+> Deprecated: Use [`protoc-gen-sphere-binding`](https://github.com/go-sphere/protoc-gen-sphere-binding) instead.
 
 Injects struct tags into generated Protobuf message files (`.pb.go`). This command is an optimization for the Sphere framework, inspired by `favadi/protoc-go-inject-tag`.
 
