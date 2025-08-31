@@ -1,38 +1,47 @@
 package create
 
 import (
+	"encoding/json"
+	"errors"
 	"log"
+	"net/http"
 	"os"
 	"os/exec"
 	"path/filepath"
 	"strings"
+	"time"
 
 	"github.com/go-sphere/sphere-cli/internal/renamer"
 	"github.com/go-sphere/sphere-cli/internal/zip"
 )
 
-const (
-	sphereModule                = "github.com/go-sphere/sphere"
-	defaultProjectLayout        = "https://github.com/go-sphere/sphere-layout/archive/refs/heads/master.zip"
-	defaultProjectLayoutModName = "github.com/go-sphere/sphere-layout"
-	defaultLayoutPath           = "sphere-layout-master"
-)
+type TemplateLayout struct {
+	URI  string `json:"uri,omitempty"`
+	Mod  string `json:"mod,omitempty"`
+	Path string `json:"path,omitempty"`
+}
 
-func Project(name, mod string) error {
+var defaultTemplateLayout = TemplateLayout{
+	URI:  "https://github.com/go-sphere/sphere-layout/archive/refs/heads/master.zip",
+	Mod:  "github.com/go-sphere/sphere-layout",
+	Path: "sphere-layout-master",
+}
+
+func Project(name, mod string, layout *TemplateLayout) error {
 	targetDir, err := filepath.Abs(filepath.Join(".", name))
 	if err != nil {
 		return err
 	}
 
 	// download and unzip the default project layout
-	tempDir, err := zip.DownloadAndUnzip(defaultProjectLayout)
+	tempDir, err := zip.DownloadAndUnzip(layout.URI)
 	if err != nil {
 		return err
 	}
 	defer func() {
 		_ = os.RemoveAll(tempDir)
 	}()
-	layoutDir := filepath.Join(tempDir, defaultLayoutPath)
+	layoutDir := filepath.Join(tempDir, layout.Path)
 
 	// init git repository
 	err = initGitRepo(layoutDir)
@@ -41,7 +50,7 @@ func Project(name, mod string) error {
 	}
 
 	// rename the Go module name
-	err = renameGoModule(defaultProjectLayoutModName, mod, layoutDir)
+	err = renameGoModule(layout.Mod, mod, layoutDir)
 	if err != nil {
 		return err
 	}
@@ -53,6 +62,34 @@ func Project(name, mod string) error {
 	}
 
 	return nil
+}
+
+func Layout(uri string) (*TemplateLayout, error) {
+	if uri == "" {
+		return &defaultTemplateLayout, nil
+	}
+	client := http.Client{
+		Timeout: 10 * time.Second,
+	}
+	resp, err := client.Get(uri)
+	if err != nil {
+		return nil, err
+	}
+	defer func() {
+		_ = resp.Body.Close()
+	}()
+	if resp.StatusCode != http.StatusOK {
+		return nil, errors.New("failed to fetch layout configuration: " + resp.Status)
+	}
+	var layout TemplateLayout
+	err = json.NewDecoder(resp.Body).Decode(&layout)
+	if err != nil {
+		return nil, err
+	}
+	if layout.URI == "" || layout.Mod == "" || layout.Path == "" {
+		return nil, errors.New("invalid layout configuration")
+	}
+	return &layout, nil
 }
 
 func moveTempDirToTarget(source, target string) error {
