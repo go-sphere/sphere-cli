@@ -21,35 +21,38 @@ var createListCmd = &cobra.Command{
 
 func init() {
 	rootCmd.AddCommand(createCmd)
+	createCmd.AddCommand(createListCmd)
 
-	flag := createCmd.Flags()
-	name := flag.String("name", "", "Name of the new Sphere project")
-	module := flag.String("module", "", "Go module name for the project (optional)")
-	layout := flag.String("layout", "", "Custom template layout URI (optional)")
-
-	createCmd.RunE = func(cmd *cobra.Command, args []string) error {
-		if *name == "" {
-			return errors.New("--name is required")
+	{
+		flag := createCmd.Flags()
+		name := flag.String("name", "", "Name of the new Sphere project")
+		module := flag.String("module", "", "Go module name for the project (optional)")
+		layout := flag.String("layout", "", "Custom template layout URI (optional)")
+		createCmd.RunE = func(cmd *cobra.Command, args []string) error {
+			if *name == "" {
+				return errors.New("--name is required")
+			}
+			if *module == "" {
+				module = name // Default to the project name if no module is specified
+			}
+			tmpl, err := create.Layout(*layout)
+			if err != nil {
+				return err
+			}
+			return create.Project(*name, *module, tmpl)
 		}
-		if *module == "" {
-			module = name // Default to the project name if no module is specified
-		}
-		tmpl, err := create.Layout(*layout)
-		if err != nil {
-			return err
-		}
-		return create.Project(*name, *module, tmpl)
 	}
 
-	createCmd.AddCommand(createListCmd)
-	createListCmd.RunE = func(cmd *cobra.Command, args []string) error {
-		templates, err := create.LayoutList()
-		if err != nil {
-			return err
+	{
+		createListCmd.RunE = func(cmd *cobra.Command, args []string) error {
+			templates, err := create.LayoutList()
+			if err != nil {
+				return err
+			}
+			for _, item := range templates {
+				cmd.Println(item.Name, ":", item.Description, " (", item.Path, ")")
+			}
+			return nil
 		}
-		for _, item := range templates {
-			cmd.Println(item.Name, ":", item.Description, " (", item.Path, ")")
-		}
-		return nil
 	}
 }
