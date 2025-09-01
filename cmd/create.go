@@ -13,6 +13,12 @@ var createCmd = &cobra.Command{
 	Long:  `Create a new Sphere project with the specified name and optional template.`,
 }
 
+var createListCmd = &cobra.Command{
+	Use:   "list",
+	Short: "List available project templates",
+	Long:  `List all available project templates that can be used when creating a new Sphere project.`,
+}
+
 func init() {
 	rootCmd.AddCommand(createCmd)
 
@@ -33,5 +39,17 @@ func init() {
 			return err
 		}
 		return create.Project(*name, *module, tmpl)
+	}
+
+	createCmd.AddCommand(createListCmd)
+	createListCmd.RunE = func(cmd *cobra.Command, args []string) error {
+		templates, err := create.LayoutList()
+		if err != nil {
+			return err
+		}
+		for _, item := range templates {
+			cmd.Println(item.Name, ":", item.Description, " (", item.Path, ")")
+		}
+		return nil
 	}
 }

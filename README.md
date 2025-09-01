@@ -47,6 +47,15 @@ sphere-cli create --name <project-name> [--module <go-module-name>] [--layout <t
 - `--module string`: (Optional) The Go module path for the project.
 - `--layout string`: (Optional) Custom template layout URI.
 
+#### `create list`
+
+List available project templates
+
+**Usage:**
+```shell
+sphere-cli create list
+```
+
 ---
 
 ### `entproto`

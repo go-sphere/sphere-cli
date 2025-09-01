@@ -21,6 +21,12 @@ type TemplateLayout struct {
 	Path string `json:"path,omitempty"`
 }
 
+type LayoutItem struct {
+	Name        string `json:"name"`
+	Path        string `json:"path"`
+	Description string `json:"description"`
+}
+
 var defaultTemplateLayout = TemplateLayout{
 	URI:  "https://github.com/go-sphere/sphere-layout/archive/refs/heads/master.zip",
 	Mod:  "github.com/go-sphere/sphere-layout",
@@ -90,6 +96,28 @@ func Layout(uri string) (*TemplateLayout, error) {
 		return nil, errors.New("invalid layout configuration")
 	}
 	return &layout, nil
+}
+
+func LayoutList() ([]*LayoutItem, error) {
+	client := http.Client{
+		Timeout: 10 * time.Second,
+	}
+	resp, err := client.Get("https://go-sphere.github.io/layout/list.json")
+	if err != nil {
+		return nil, err
+	}
+	defer func() {
+		_ = resp.Body.Close()
+	}()
+	if resp.StatusCode != http.StatusOK {
+		return nil, errors.New("failed to fetch layout list: " + resp.Status)
+	}
+	var layouts []*LayoutItem
+	err = json.NewDecoder(resp.Body).Decode(&layouts)
+	if err != nil {
+		return nil, err
+	}
+	return layouts, nil
 }
 
 func moveTempDirToTarget(source, target string) error {
