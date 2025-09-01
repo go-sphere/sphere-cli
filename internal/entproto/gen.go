@@ -201,8 +201,6 @@ func addAnnotationForField(fd *gen.Field, idGenerator *fieldIDGenerator, options
 	}
 }
 
-//
-
 func fixUnsupportedType(unsupportedProtoType string) (field.Type, []entproto.FieldOption) {
 	switch unsupportedProtoType {
 	case "bytes":

@@ -7,7 +7,6 @@ import (
 	"text/template"
 
 	"github.com/go-openapi/inflect"
-	"github.com/iancoleman/strcase"
 )
 
 type serviceConfig struct {
@@ -22,14 +21,16 @@ type serviceConfig struct {
 var serviceTemplate string
 
 func GenServiceGolang(name, pkg, mod string) (string, error) {
+
+	rules := inflect.NewDefaultRuleset()
+
 	conf := serviceConfig{
-		ServiceName:     strcase.ToCamel(name),
+		ServiceName:     rules.Camelize(name),
 		PackagePath:     strings.Join(strings.Split(pkg, "."), "/"),
 		ServicePackage:  strings.ReplaceAll(pkg, ".", ""),
 		BizPackagePath:  mod,
 		ServiceFileName: strings.ToLower(name),
 	}
-	rules := inflect.NewDefaultRuleset()
 
 	tmpl, err := template.New("service").Funcs(template.FuncMap{
 		"plural": rules.Pluralize,

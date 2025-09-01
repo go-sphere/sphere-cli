@@ -6,7 +6,6 @@ import (
 	"text/template"
 
 	"github.com/go-openapi/inflect"
-	"github.com/iancoleman/strcase"
 )
 
 type protoConfig struct {
@@ -20,13 +19,14 @@ type protoConfig struct {
 var protoTemplate string
 
 func GenServiceProto(name, pkg string) (string, error) {
+	rules := inflect.NewDefaultRuleset()
+
 	conf := protoConfig{
 		PackageName: pkg,
-		ServiceName: strcase.ToCamel(name),
-		RouteName:   strcase.ToKebab(name),
-		EntityName:  strcase.ToSnake(name),
+		ServiceName: rules.Camelize(name),
+		RouteName:   rules.Dasherize(name),
+		EntityName:  rules.Underscore(name),
 	}
-	rules := inflect.NewDefaultRuleset()
 
 	tmpl, err := template.New("proto").Funcs(template.FuncMap{
 		"plural": rules.Pluralize,

@@ -7,7 +7,6 @@ require (
 	entgo.io/ent v0.14.5
 	github.com/go-openapi/inflect v0.21.3
 	github.com/go-viper/mapstructure/v2 v2.4.0
-	github.com/iancoleman/strcase v0.3.0
 	github.com/jhump/protoreflect v1.17.0
 	github.com/spf13/cobra v1.9.1
 	google.golang.org/protobuf v1.36.8
