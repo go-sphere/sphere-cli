@@ -10,7 +10,7 @@ func TestProject(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	_ = os.Remove("example")
+	_ = os.RemoveAll("example")
 }
 
 func TestLayout(t *testing.T) {
@@ -18,9 +18,9 @@ func TestLayout(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	err = Project("example", "example", layout)
+	err = Project("simple", "simple", layout)
 	if err != nil {
 		t.Fatal(err)
 	}
-	_ = os.Remove("example")
+	_ = os.RemoveAll("simple")
 }

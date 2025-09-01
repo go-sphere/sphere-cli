@@ -14,9 +14,9 @@ import (
 	"entgo.io/ent/entc"
 	"entgo.io/ent/entc/gen"
 	"entgo.io/ent/schema/field"
+	"github.com/go-viper/mapstructure/v2"
 	"github.com/jhump/protoreflect/desc" //nolint
 	"github.com/jhump/protoreflect/desc/protoprint"
-	"github.com/mitchellh/mapstructure"
 	"google.golang.org/protobuf/types/descriptorpb"
 )
 
