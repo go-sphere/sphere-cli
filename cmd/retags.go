@@ -6,9 +6,10 @@ import (
 )
 
 var retagsCmd = &cobra.Command{
-	Use:   "retags",
-	Short: "Inject custom tags to protobuf golang struct",
-	Long:  `Refer to "favadi/protoc-go-inject-tag", which is specifically optimized for the sphere project.`,
+	Use:        "retags",
+	Deprecated: "retags is deprecated, please use protoc-gen-sphere-binding directly.",
+	Short:      "Inject custom tags to protobuf golang struct",
+	Long:       `Refer to "favadi/protoc-go-inject-tag", which is specifically optimized for the sphere project.`,
 }
 
 func init() {

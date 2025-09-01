@@ -7,9 +7,10 @@ import (
 )
 
 var rootCmd = &cobra.Command{
-	Use:   "sphere-cli",
-	Short: "A tool for managing sphere projects",
-	Long:  `Sphere CLI is a command-line tool designed to help you manage Sphere projects efficiently.`,
+	Use:     "sphere-cli",
+	Version: "v0.0.2",
+	Short:   "A tool for managing sphere projects",
+	Long:    `Sphere CLI is a command-line tool designed to help you manage Sphere projects efficiently.`,
 }
 
 func Execute() {
