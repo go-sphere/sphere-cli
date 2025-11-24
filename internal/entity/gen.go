@@ -4,7 +4,6 @@ import (
 	"errors"
 	"fmt"
 	"go/format"
-	"log"
 	"os"
 	"path"
 	"path/filepath"
@@ -15,6 +14,7 @@ import (
 	"github.com/go-sphere/sphere-cli/internal/entity/mapper"
 	"github.com/jhump/protoreflect/desc"
 	"github.com/jhump/protoreflect/desc/protoprint"
+	"golang.org/x/tools/imports"
 )
 
 type ProtoOptions struct {
@@ -125,14 +125,17 @@ func generateMappers(graph *gen.Graph, options *MapperOptions) error {
 		if nErr != nil {
 			return nErr
 		}
+		fileName := gen.Funcs["snake"].(func(string) string)(node.Name) + ".go"
 		formatted, fmtErr := format.Source(content)
 		if fmtErr != nil {
 			return fmt.Errorf("entproto: format entmapper for %s: %w", node.Name, fmtErr)
 		}
-		fileName := gen.Funcs["snake"].(func(string) string)(node.Name) + ".go"
+		fixImport, nErr := imports.Process(fileName, formatted, nil)
+		if nErr != nil {
+			return fmt.Errorf("entproto: format entmapper for %s: %w", node.Name, nErr)
+		}
 		outPath := filepath.Join(options.MapperDir, fileName)
-		log.Printf("entproto: generating entmapper for %s to %s", node.Name, outPath)
-		nErr = os.WriteFile(outPath, formatted, 0644)
+		nErr = os.WriteFile(outPath, fixImport, 0644)
 		if nErr != nil {
 			return nErr
 		}

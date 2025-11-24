@@ -87,8 +87,8 @@ func init() {
 		mapperDir := flag.String("mapper", "./mapper", "path to mapper directory")
 		mapperPackage := flag.String("mapper_package", "mapper", "package name for the generated mapper code")
 		entPackage := flag.String("ent_package", "ent", "package name for the ent code")
-		protoPkgPath := flag.String("proto_pkg_path", "github.com/go-sphere/sphere-layout/proto", "go module path for the generated proto code")
-		protoPkgName := flag.String("proto_pkg_name", "proto", "package name for the generated proto code")
+		protoPkgName := flag.String("proto_pkg_name", "entpb", "package name for the generated proto code")
+		protoPkgPath := flag.String("proto_pkg_path", "", "go module path for the generated proto code")
 		ent2mapperCmd.RunE = func(cmd *cobra.Command, args []string) error {
 			return entity.GenerateMapper(&entity.MapperOptions{
 				Graph:         shareOptions.ToGraphOptions(),
