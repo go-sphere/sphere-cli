@@ -1,10 +1,8 @@
-package entproto
+package graph
 
 import (
-	"errors"
 	"fmt"
 	"log"
-	"path"
 	"reflect"
 	"sort"
 	"strings"
@@ -16,13 +14,11 @@ import (
 	"entgo.io/ent/schema/field"
 	"github.com/go-viper/mapstructure/v2"
 	"github.com/jhump/protoreflect/desc" //nolint
-	"github.com/jhump/protoreflect/desc/protoprint"
 	"google.golang.org/protobuf/types/descriptorpb"
 )
 
 type Options struct {
 	SchemaPath string
-	ProtoDir   string
 
 	AllFieldsRequired bool
 	AutoAddAnnotation bool
@@ -42,56 +38,20 @@ type ProtoPackage struct {
 	Types []string
 }
 
-func Generate(options *Options) {
+func LoadGraph(options *Options) (*gen.Graph, error) {
 	injectProtoPackages(options.ProtoPackages)
 	graph, err := entc.LoadGraph(options.SchemaPath, &gen.Config{
 		Target: options.SchemaPath,
 	})
 	if err != nil {
-		log.Fatalf("entproto: failed loading ent graph: %v", err)
+		log.Fatalf("entproto: failed loading entity graph: %v", err)
 	}
 	if options.AutoAddAnnotation {
 		for i := 0; i < len(graph.Nodes); i++ {
 			addAnnotationForNode(graph.Nodes[i], options)
 		}
 	}
-	err = generate(graph, options)
-	if err != nil {
-		log.Fatalf("entproto: failed generating protos: %s", err)
-	}
-}
-
-func generate(g *gen.Graph, options *Options) error {
-	entProtoDir := path.Join(g.Target, "proto")
-	if options.ProtoDir != "" {
-		entProtoDir = options.ProtoDir
-	}
-	adapter, err := entproto.LoadAdapter(g)
-	if err != nil {
-		return fmt.Errorf("entproto: failed parsing ent graph: %w", err)
-	}
-	var errs []error
-	for _, schema := range g.Schemas {
-		name := schema.Name
-		_, sErr := adapter.GetFileDescriptor(name)
-		if sErr != nil && !errors.Is(sErr, entproto.ErrSchemaSkipped) {
-			errs = append(errs, sErr)
-		}
-	}
-	if len(errs) > 0 {
-		return fmt.Errorf("entproto: failed parsing some schemas: %w", errors.Join(errs...))
-	}
-	allDescriptors := make([]*desc.FileDescriptor, 0, len(adapter.AllFileDescriptors()))
-	for _, fDesc := range adapter.AllFileDescriptors() {
-		fixProto3Optional(g, fDesc)
-		allDescriptors = append(allDescriptors, fDesc)
-	}
-	var printer protoprint.Printer
-	printer.Compact = true
-	if err = printer.PrintProtosToFileSystem(allDescriptors, entProtoDir); err != nil {
-		return fmt.Errorf("entproto: failed writing .proto files: %w", err)
-	}
-	return nil
+	return graph, err
 }
 
 func addAnnotationForNode(node *gen.Type, options *Options) {
@@ -239,7 +199,7 @@ var (
 	optionalFieldLabel    = descriptorpb.FieldDescriptorProto_LABEL_OPTIONAL
 )
 
-func fixProto3Optional(g *gen.Graph, fDesc *desc.FileDescriptor) {
+func FixProto3Optional(g *gen.Graph, fDesc *desc.FileDescriptor) {
 	messageMap := make(map[string]*desc.MessageDescriptor)
 	for _, message := range fDesc.GetMessageTypes() {
 		messageMap[message.GetName()] = message
