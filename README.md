@@ -58,29 +58,6 @@ sphere-cli create list
 
 ---
 
-### `entproto`
-
-Converts Ent schemas into Protobuf (`.proto`) definitions. This command reads your Ent schema files and generates corresponding `.proto` files.
-
-**Usage:**
-```shell
-sphere-cli entproto [flags]
-```
-
-**Flags:**
-- `--path string`: Path to the Ent schema directory (default: `./schema`).
-- `--proto string`: Output directory for the generated `.proto` files (default: `./proto`).
-- `--all_fields_required`: Treat all fields as required, ignoring `Optional()` (default: `true`).
-- `--auto_annotation`: Automatically add `@entproto` annotations to the schema (default: `true`).
-- `--enum_raw_type`: Use `string` as the type for enums in Protobuf (default: `true`).
-- `--skip_unsupported`: Skip fields with types that are not supported (default: `true`).
-- `--time_proto_type string`: Protobuf type to use for `time.Time` fields. Options: `int64`, `string`, `google.protobuf.Timestamp` (default: `int64`).
-- `--uuid_proto_type string`: Protobuf type to use for `uuid.UUID` fields. Options: `string`, `bytes` (default: `string`).
-- `--unsupported_proto_type string`: Protobuf type to use for unsupported fields. Options: `google.protobuf.Any`, `google.protobuf.Struct`, `bytes` (default: `google.protobuf.Any`).
-- `--import_proto string`: Define external Protobuf imports. Format: `path1,package1,type1;path2,package2,type2` (default: `google/protobuf/any.proto,google.protobuf,Any;`).
-
----
-
 ### `service`
 
 Generates service code, including both Protobuf definitions and Go service implementations.
