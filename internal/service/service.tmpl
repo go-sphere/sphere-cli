@@ -48,15 +48,15 @@ func (s *Service) List{{plural .ServiceName}}(ctx context.Context, request *{{.S
 	if err != nil {
 		return nil, err
 	}
-	page, size := conv.Page(count, int(request.PageSize), conv.DefaultPageSize)
-	all, err := query.Clone().Limit(size).Order({{toLower .ServiceName}}.ByID(sql.OrderDesc())).Offset(size * int(request.Page)).All(ctx)
+    totalPage, pageSize := conv.Page(count, int(request.PageSize))
+	all, err := query.Clone().Limit(pageSize).Order({{toLower .ServiceName}}.ByID(sql.OrderDesc())).Offset(pageSize * int(request.Page)).All(ctx)
 	if err != nil {
 		return nil, err
 	}
 	return &{{.ServicePackage}}.List{{plural .ServiceName}}Response{
 		{{plural .ServiceName}}: conv.Map(all, s.render.{{.ServiceName}}),
 		TotalSize: int64(count),
-		TotalPage: int64(page),
+		TotalPage: int64(totalPage),
 	}, nil
 }
 
