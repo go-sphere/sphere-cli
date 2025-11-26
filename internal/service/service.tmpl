@@ -6,6 +6,7 @@ import (
 
     "entgo.io/ent/dialect/sql"
     {{.ServicePackage}} "{{.BizPackagePath}}/api/{{.PackagePath}}"
+    "{{.BizPackagePath}}/internal/pkg/conv"
     "{{.BizPackagePath}}/internal/pkg/database/ent/{{toLower .ServiceName}}"
     "{{.BizPackagePath}}/internal/pkg/render"
     "{{.BizPackagePath}}/internal/pkg/render/entbind"
@@ -47,13 +48,13 @@ func (s *Service) List{{plural .ServiceName}}(ctx context.Context, request *{{.S
 	if err != nil {
 		return nil, err
 	}
-	page, size := render.Page(count, int(request.PageSize), render.DefaultPageSize)
+	page, size := conv.Page(count, int(request.PageSize), conv.DefaultPageSize)
 	all, err := query.Clone().Limit(size).Order({{toLower .ServiceName}}.ByID(sql.OrderDesc())).Offset(size * int(request.Page)).All(ctx)
 	if err != nil {
 		return nil, err
 	}
 	return &{{.ServicePackage}}.List{{plural .ServiceName}}Response{
-		{{plural .ServiceName}}: render.Map(all, s.render.{{.ServiceName}}),
+		{{plural .ServiceName}}: conv.Map(all, s.render.{{.ServiceName}}),
 		TotalSize: int64(count),
 		TotalPage: int64(page),
 	}, nil
