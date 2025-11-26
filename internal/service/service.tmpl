@@ -4,15 +4,17 @@ package dash
 import (
 	"context"
 
-	"github.com/go-sphere/sphere/database/mapper"
-	{{.ServicePackage}} "{{.BizPackagePath}}/api/{{.PackagePath}}"
+    "entgo.io/ent/dialect/sql"
+    {{.ServicePackage}} "{{.BizPackagePath}}/api/{{.PackagePath}}"
+    "{{.BizPackagePath}}/internal/pkg/database/ent/{{toLower .ServiceName}}"
     "{{.BizPackagePath}}/internal/pkg/render"
+    "{{.BizPackagePath}}/internal/pkg/render/entbind"
 )
 
 var _ {{.ServicePackage}}.{{.ServiceName}}ServiceHTTPServer = (*Service)(nil)
 
 func (s *Service) Create{{.ServiceName}}(ctx context.Context, request *{{.ServicePackage}}.Create{{.ServiceName}}Request) (*{{.ServicePackage}}.Create{{.ServiceName}}Response, error) {
-	item, err := render.Create{{.ServiceName}}(s.db.{{.ServiceName}}.Create(), request.{{.ServiceName}}).Save(ctx)
+	item, err := entbind.Create{{.ServiceName}}(s.db.{{.ServiceName}}.Create(), request.{{.ServiceName}}).Save(ctx)
 	if err != nil {
 		return nil, err
 	}
@@ -45,20 +47,20 @@ func (s *Service) List{{plural .ServiceName}}(ctx context.Context, request *{{.S
 	if err != nil {
 		return nil, err
 	}
-	page, size := mapper.Page(count, int(request.PageSize), mapper.DefaultPageSize)
-	all, err := query.Clone().Limit(size).Offset(size * int(request.Page)).All(ctx)
+	page, size := render.Page(count, int(request.PageSize), render.DefaultPageSize)
+	all, err := query.Clone().Limit(size).Order({{toLower .ServiceName}}.ByID(sql.OrderDesc())).Offset(size * int(request.Page)).All(ctx)
 	if err != nil {
 		return nil, err
 	}
 	return &{{.ServicePackage}}.List{{plural .ServiceName}}Response{
-		{{plural .ServiceName}}: mapper.Map(all, s.render.{{.ServiceName}}),
+		{{plural .ServiceName}}: render.Map(all, s.render.{{.ServiceName}}),
 		TotalSize: int64(count),
 		TotalPage: int64(page),
 	}, nil
 }
 
 func (s *Service) Update{{.ServiceName}}(ctx context.Context, request *{{.ServicePackage}}.Update{{.ServiceName}}Request) (*{{.ServicePackage}}.Update{{.ServiceName}}Response, error) {
-	item, err := render.UpdateOne{{.ServiceName}}(
+	item, err := entbind.UpdateOne{{.ServiceName}}(
 		s.db.{{.ServiceName}}.UpdateOneID(request.{{.ServiceName}}.Id),
 		request.{{.ServiceName}},
 	).Save(ctx)

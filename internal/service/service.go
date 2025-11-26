@@ -33,7 +33,8 @@ func GenServiceGolang(name, pkg, mod string) (string, error) {
 	}
 
 	tmpl, err := template.New("service").Funcs(template.FuncMap{
-		"plural": rules.Pluralize,
+		"plural":  rules.Pluralize,
+		"toLower": strings.ToLower,
 	}).Parse(serviceTemplate)
 	if err != nil {
 		return "", err
