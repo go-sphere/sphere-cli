@@ -46,6 +46,9 @@ var templateLayouts = map[string]*TemplateLayout{
 }
 
 func Project(name, mod string, layout *TemplateLayout) error {
+	if layout == nil {
+		return errors.New("invalid layout")
+	}
 	targetDir, err := filepath.Abs(filepath.Join(".", name))
 	if err != nil {
 		return err

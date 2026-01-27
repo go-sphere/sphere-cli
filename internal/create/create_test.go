@@ -12,7 +12,7 @@ func TestProject(t *testing.T) {
 	if !*createTest {
 		t.Skip("Skipping create tests, run with -create_test to enable")
 	}
-	err := Project("example", "example", &defaultTemplateLayout)
+	err := Project("example", "example", templateLayouts[""])
 	if err != nil {
 		t.Fatal(err)
 	}
