@@ -27,10 +27,22 @@ type LayoutItem struct {
 	Description string `json:"description"`
 }
 
-var defaultTemplateLayout = TemplateLayout{
-	URI:  "https://github.com/go-sphere/sphere-layout/archive/refs/heads/master.zip",
-	Mod:  "github.com/go-sphere/sphere-layout",
-	Path: "sphere-layout-master",
+var templateLayouts = map[string]*TemplateLayout{
+	"": {
+		URI:  "https://github.com/go-sphere/sphere-layout/archive/refs/heads/master.zip",
+		Mod:  "github.com/go-sphere/sphere-layout",
+		Path: "sphere-layout-master",
+	},
+	"bun": {
+		URI:  "https://github.com/go-sphere/sphere-bun-layout/archive/refs/heads/master.zip",
+		Mod:  "github.com/go-sphere/sphere-bun-layout",
+		Path: "sphere-bun-layout-master",
+	},
+	"simple": {
+		URI:  "https://github.com/go-sphere/sphere-simple-layout/archive/refs/heads/master.zip",
+		Mod:  "github.com/go-sphere/sphere-simple-layout",
+		Path: "sphere-simple-layout-master",
+	},
 }
 
 func Project(name, mod string, layout *TemplateLayout) error {
@@ -70,14 +82,14 @@ func Project(name, mod string, layout *TemplateLayout) error {
 	return nil
 }
 
-func Layout(uri string) (*TemplateLayout, error) {
-	if uri == "" {
-		return &defaultTemplateLayout, nil
+func Layout(nameOrUri string) (*TemplateLayout, error) {
+	if layout, ok := templateLayouts[nameOrUri]; ok {
+		return layout, nil
 	}
 	client := http.Client{
 		Timeout: 10 * time.Second,
 	}
-	resp, err := client.Get(uri)
+	resp, err := client.Get(nameOrUri)
 	if err != nil {
 		return nil, err
 	}

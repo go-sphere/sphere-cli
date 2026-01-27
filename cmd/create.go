@@ -27,7 +27,7 @@ func init() {
 		flag := createCmd.Flags()
 		name := flag.String("name", "", "Name of the new Sphere project")
 		module := flag.String("module", "", "Go module name for the project (optional)")
-		layout := flag.String("layout", "", "Custom template layout URI (optional)")
+		layout := flag.String("layout", "", "Sphere layout name or custom template layout URI (optional)")
 		createCmd.RunE = func(cmd *cobra.Command, args []string) error {
 			if *name == "" {
 				return errors.New("--name is required")
