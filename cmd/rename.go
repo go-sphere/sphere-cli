@@ -25,6 +25,12 @@ func init() {
 		if *oldMod == "" || *newMod == "" {
 			return errors.New("--old and --new are required")
 		}
-		return renamer.RenameDirModule(*oldMod, *newMod, *target)
+		if *oldMod == *newMod {
+			return errors.New("--old and --new must be different")
+		}
+		return renamer.RenameProjectModule(*oldMod, *newMod, *target, []string{
+			"buf.gen.yaml",
+			"buf.binding.yaml",
+		}, true)
 	}
 }

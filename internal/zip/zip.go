@@ -9,10 +9,19 @@ import (
 	"os"
 	"path/filepath"
 	"strings"
+	"time"
+)
+
+const (
+	httpTimeout     = 90 * time.Second
+	maxZipSizeBytes = 100 << 20 // 100 MiB
 )
 
 func downloadZipReader(url string) (*zip.Reader, func(), error) {
-	resp, err := http.Get(url)
+	client := http.Client{
+		Timeout: httpTimeout,
+	}
+	resp, err := client.Get(url)
 	if err != nil {
 		return nil, nil, err
 	}
@@ -22,27 +31,50 @@ func downloadZipReader(url string) (*zip.Reader, func(), error) {
 	if resp.StatusCode != http.StatusOK {
 		return nil, nil, errors.New(resp.Status)
 	}
+	if resp.ContentLength > maxZipSizeBytes {
+		return nil, nil, fmt.Errorf("zip file too large: %d bytes", resp.ContentLength)
+	}
 	tempFile, err := os.CreateTemp("", "zip-*")
 	if err != nil {
 		return nil, nil, err
 	}
-	length, err := io.Copy(tempFile, resp.Body)
+	cleanup := func() {
+		_ = tempFile.Close()
+		_ = os.Remove(tempFile.Name())
+	}
+	length, err := io.Copy(tempFile, io.LimitReader(resp.Body, maxZipSizeBytes+1))
 	if err != nil {
+		cleanup()
 		return nil, nil, err
+	}
+	if length > maxZipSizeBytes {
+		cleanup()
+		return nil, nil, fmt.Errorf("zip file too large: exceeded %d bytes", maxZipSizeBytes)
 	}
 	reader, err := zip.NewReader(tempFile, length)
 	if err != nil {
+		cleanup()
 		return nil, nil, err
 	}
 	return reader, func() {
-		_ = tempFile.Close()
-		_ = os.Remove(tempFile.Name())
+		cleanup()
 	}, nil
 }
 
 func ensureSafePath(tempDir, fileName string) (string, error) {
-	filePath := filepath.Join(tempDir, fileName)
-	if !strings.HasPrefix(filePath, filepath.Clean(tempDir)) {
+	basePath, err := filepath.Abs(filepath.Clean(tempDir))
+	if err != nil {
+		return "", err
+	}
+	filePath, err := filepath.Abs(filepath.Join(basePath, fileName))
+	if err != nil {
+		return "", err
+	}
+	relPath, err := filepath.Rel(basePath, filePath)
+	if err != nil {
+		return "", err
+	}
+	if relPath == ".." || strings.HasPrefix(relPath, ".."+string(os.PathSeparator)) {
 		return "", fmt.Errorf("unsafe file path: %s", filePath)
 	}
 	return filePath, nil

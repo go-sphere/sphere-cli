@@ -153,21 +153,13 @@ func initGitRepo(target string) error {
 
 func renameGoModule(oldModName, newModName, target string) error {
 	log.Printf("rename module: %s -> %s", oldModName, newModName)
-	err := renamer.RenameDirModule(oldModName, newModName, target)
-	if err != nil {
-		return err
-	}
-	files := []string{
+	if err := renamer.RenameProjectModule(oldModName, newModName, target, []string{
 		"buf.gen.yaml",
 		"buf.binding.yaml",
+	}, false); err != nil {
+		return err
 	}
-	for _, file := range files {
-		e := replaceFileContent(oldModName, newModName, filepath.Join(target, file))
-		if e != nil {
-			return e
-		}
-	}
-	err = execCommands(target,
+	err := execCommands(target,
 		[]string{"go", "mod", "edit", "-module", newModName},
 		[]string{"make", "init"},
 		[]string{"go", "mod", "tidy"},
@@ -197,21 +189,4 @@ func execCommands(dir string, commands ...[]string) error {
 		}
 	}
 	return nil
-}
-
-func replaceFileContent(old, new, filePath string) error {
-	content, err := os.ReadFile(filePath)
-	if err != nil {
-		return err
-	}
-	replacer := strings.NewReplacer(old, new)
-	file, err := os.Create(filePath)
-	if err != nil {
-		return err
-	}
-	defer func() {
-		_ = file.Close()
-	}()
-	_, err = replacer.WriteString(file, string(content))
-	return err
 }
