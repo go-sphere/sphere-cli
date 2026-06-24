@@ -1,119 +1,165 @@
 # Sphere CLI
 
-Sphere CLI (`sphere-cli`) is a command-line tool designed to streamline the development of [Sphere](https://github.com/go-sphere/sphere) projects. It helps you create new projects, generate service code, manage Protobuf definitions, and perform other common development tasks.
+Sphere CLI (`sphere-cli`) is a small bootstrap tool for [Sphere](https://github.com/go-sphere/sphere) projects. Its main job is to create projects from templates, list available templates, rename module paths, and provide a few lightweight generation helpers.
 
+It is intentionally not the primary build, deploy, or runtime orchestration tool. After a project is created, day-to-day work should happen through the template Makefile, Buf, Go, Docker, and other mature tools already used by the Go ecosystem.
 
 ## Installation
 
-To install `sphere-cli`, ensure you have Go installed and run the following command:
+To install `sphere-cli`, ensure you have Go installed and run:
 
 ```shell
 go install github.com/go-sphere/sphere-cli@latest
 ```
 
+## Scope
+
+`sphere-cli` is responsible for:
+
+- creating projects from official or custom layout templates;
+- listing available project templates;
+- renaming Go module paths after project creation;
+- generating small service skeletons when convenient.
+
+`sphere-cli` is not responsible for:
+
+- building binaries;
+- running tests and linters;
+- generating all project artifacts;
+- managing Docker or Kubernetes deployment;
+- replacing `make`, `buf`, `go`, `docker`, `wire`, `swag`, or other focused tools.
+
+Generated templates expose those workflows through `make` targets instead.
 
 ## Usage
 
-The general syntax for `sphere-cli` is:
+The general syntax is:
 
 ```shell
 sphere-cli [command] [flags]
 ```
 
-For detailed information on any command, you can use the `--help` flag:
+For detailed information on any command:
 
 ```shell
 sphere-cli [command] --help
 ```
 
-
 ## Commands
-
-Here is an overview of the available commands.
-
----
 
 ### `create`
 
-Initializes a new Sphere project with a default template.
+Initializes a new Sphere project from a layout template.
 
 **Usage:**
+
 ```shell
-sphere-cli create --name <project-name> [--module <go-module-name>] [--layout <template-uri>]
+sphere-cli create --name <project-name> [--module <go-module-name>] [--layout <template-uri-or-name>]
 ```
 
 **Flags:**
-- `--name string`: (Required) The name for the new Sphere project.
-- `--module string`: (Optional) The Go module path for the project.
-- `--layout string`: (Optional) Custom template layout URI.
 
-#### `create list`
+- `--name string`: Required project directory name.
+- `--module string`: Optional Go module path. Defaults to the project name when omitted.
+- `--layout string`: Optional layout name or custom template layout URI.
 
-List available project templates
+**Example:**
+
+```shell
+sphere-cli create --name myproject --module github.com/myorg/myproject
+cd myproject
+make init
+make run
+```
+
+### `create list`
+
+Lists available project templates.
 
 **Usage:**
+
 ```shell
 sphere-cli create list
 ```
 
----
-
 ### `service`
 
-Generates service code, including both Protobuf definitions and Go service implementations.
+Generates small service skeleton files. This is a convenience helper, not the main project generation pipeline.
 
-This command has two subcommands: `proto` and `golang`.
+The main repeatable generation workflow stays in the generated project Makefile:
+
+```shell
+make gen/db
+make gen/proto
+make gen/docs
+make gen/wire
+```
 
 #### `service proto`
 
 Generates a `.proto` file for a new service.
 
 **Usage:**
+
 ```shell
 sphere-cli service proto --name <service-name> [--package <package-name>]
 ```
 
 **Flags:**
-- `--name string`: (Required) The name of the service.
-- `--package string`: The package name for the generated `.proto` file (default: `dash.v1`).
+
+- `--name string`: Required service name.
+- `--package string`: Package name for the generated `.proto` file. Default: `dash.v1`.
 
 #### `service golang`
 
-Generates the Go implementation for a service from its definition.
+Generates a Go service implementation skeleton.
 
 **Usage:**
+
 ```shell
 sphere-cli service golang --name <service-name> [--package <package-name>] [--mod <go-module-path>]
 ```
 
 **Flags:**
-- `--name string`: (Required) The name of the service.
-- `--package string`: The package name for the generated Go code (default: `dash.v1`).
-- `--mod string`: The Go module path for the generated code (default: `github.com/go-sphere/sphere-layout`).
 
----
+- `--name string`: Required service name.
+- `--package string`: Package name for the generated Go code. Default: `dash.v1`.
+- `--mod string`: Go module path for generated imports. Default: `github.com/go-sphere/sphere-layout`.
 
 ### `rename`
 
 Performs a project-wide rename of the Go module path.
 
 **Usage:**
+
 ```shell
 sphere-cli rename --old <old-module> --new <new-module> [--target <directory>]
 ```
 
 **Flags:**
-- `--old string`: (Required) The current Go module name.
-- `--new string`: (Required) The new Go module name.
-- `--target string`: The root directory of the project to rename (default: `.`).
 
----
+- `--old string`: Required current Go module path.
+- `--new string`: Required new Go module path.
+- `--target string`: Root directory of the project to rename. Default: `.`.
 
-### Other Commands
+## Recommended Workflow
 
-- `completion`: Generates shell autocompletion scripts (for Bash, Zsh, etc.).
-- `help`: Provides help for any command.
+Use the CLI only at project boundaries:
 
+```shell
+sphere-cli create --name myproject --module github.com/myorg/myproject
+cd myproject
+make init
+```
+
+Then use the project Makefile for normal development:
+
+```shell
+make gen/all
+make run
+make lint
+make build
+```
 
 ## License
 
