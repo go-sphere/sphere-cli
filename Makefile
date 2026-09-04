@@ -6,7 +6,7 @@ DIRECT_DEPS_TEMPLATE := {{if and (not .Main) (not .Indirect) (not .Replace)}}{{.
 
 .DEFAULT_GOAL := check
 
-.PHONY: deps-update tidy fmt test lint check
+.PHONY: deps-update tidy fmt build test lint check
 
 deps-update:
 	@deps="$$(GOWORK=off $(GO) list -m -f '$(DIRECT_DEPS_TEMPLATE)' all)"; \
@@ -19,6 +19,9 @@ tidy:
 fmt:
 	$(GO) fmt ./...
 	$(GOLANGCI_LINT) fmt --no-config --enable gofmt --enable goimports
+
+build:
+	$(GO) build ./...
 
 test:
 	$(GO) test ./...
