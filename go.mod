@@ -1,9 +1,9 @@
 module github.com/go-sphere/sphere-cli
 
-go 1.24.0
+go 1.25.0
 
 require (
-	github.com/go-openapi/inflect v0.21.5
+	github.com/go-openapi/inflect v1.0.0
 	github.com/spf13/cobra v1.10.2
 )
 
