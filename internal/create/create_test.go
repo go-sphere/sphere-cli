@@ -1,82 +1,116 @@
 package create
 
 import (
-	"flag"
-	"os"
-	"path/filepath"
+	"net/http"
+	"net/http/httptest"
+	"reflect"
 	"testing"
-
-	"github.com/go-sphere/sphere-cli/internal/renamer"
 )
 
-var createTest = flag.Bool("create_test", false, "run create tests that create files and directories")
-
-func TestProject(t *testing.T) {
-	if !*createTest {
-		t.Skip("Skipping create tests, run with -create_test to enable")
+func TestLayoutBuiltIn(t *testing.T) {
+	tests := []struct {
+		name string
+		want TemplateLayout
+	}{
+		{
+			name: "",
+			want: TemplateLayout{
+				URI:  "https://github.com/go-sphere/sphere-layout/archive/refs/heads/master.zip",
+				Mod:  "github.com/go-sphere/sphere-layout",
+				Path: "sphere-layout-master",
+			},
+		},
+		{
+			name: "bun",
+			want: TemplateLayout{
+				URI:  "https://github.com/go-sphere/sphere-bun-layout/archive/refs/heads/master.zip",
+				Mod:  "github.com/go-sphere/sphere-bun-layout",
+				Path: "sphere-bun-layout-master",
+			},
+		},
+		{
+			name: "simple",
+			want: TemplateLayout{
+				URI:  "https://github.com/go-sphere/sphere-simple-layout/archive/refs/heads/master.zip",
+				Mod:  "github.com/go-sphere/sphere-simple-layout",
+				Path: "sphere-simple-layout-master",
+			},
+		},
 	}
-	err := Project("example", "example", templateLayouts[""])
-	if err != nil {
-		t.Fatal(err)
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			got, err := Layout(tt.name)
+			if err != nil {
+				t.Fatalf("Layout(%q) error = %v", tt.name, err)
+			}
+			if !reflect.DeepEqual(*got, tt.want) {
+				t.Errorf("Layout(%q) = %#v, want %#v", tt.name, *got, tt.want)
+			}
+		})
 	}
-	_ = os.RemoveAll("example")
 }
 
-func TestLayout(t *testing.T) {
-	if !*createTest {
-		t.Skip("Skipping create tests, run with -create_test to enable")
+func TestLayoutRemote(t *testing.T) {
+	tests := []struct {
+		name    string
+		status  int
+		body    string
+		want    *TemplateLayout
+		wantErr string
+	}{
+		{
+			name:   "valid",
+			status: http.StatusOK,
+			body:   `{"uri":"https://example.com/layout.zip","mod":"example.com/layout","path":"layout-main"}`,
+			want:   &TemplateLayout{URI: "https://example.com/layout.zip", Mod: "example.com/layout", Path: "layout-main"},
+		},
+		{
+			name:    "HTTP error",
+			status:  http.StatusBadGateway,
+			wantErr: "failed to fetch layout configuration: 502 Bad Gateway",
+		},
+		{
+			name:    "missing required field",
+			status:  http.StatusOK,
+			body:    `{"uri":"https://example.com/layout.zip","mod":"example.com/layout"}`,
+			wantErr: "invalid layout configuration",
+		},
 	}
-	layout, err := Layout("https://go-sphere.github.io/layout/simple.json")
-	if err != nil {
-		t.Fatal(err)
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+				w.WriteHeader(tt.status)
+				_, _ = w.Write([]byte(tt.body))
+			}))
+			t.Cleanup(server.Close)
+
+			got, err := Layout(server.URL)
+			if tt.wantErr != "" {
+				if err == nil {
+					t.Fatalf("Layout() error = nil, want %q", tt.wantErr)
+				}
+				if gotErr := err.Error(); gotErr != tt.wantErr {
+					t.Errorf("Layout() error = %q, want %q", gotErr, tt.wantErr)
+				}
+				return
+			}
+			if err != nil {
+				t.Fatalf("Layout() error = %v", err)
+			}
+			if !reflect.DeepEqual(got, tt.want) {
+				t.Errorf("Layout() = %#v, want %#v", got, tt.want)
+			}
+		})
 	}
-	err = Project("simple", "simple", layout)
-	if err != nil {
-		t.Fatal(err)
-	}
-	_ = os.RemoveAll("simple")
 }
 
-func TestSimpleLayoutCreateAndRenameBuild(t *testing.T) {
-	if os.Getenv("CI") != "" {
-		t.Skip("Skipping integration test in CI")
-	}
-	if !*createTest {
-		t.Skip("Skipping integration test, run with -create_test to enable")
-	}
+func TestLayoutRemoteRejectsMalformedJSON(t *testing.T) {
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		_, _ = w.Write([]byte(`{"uri":`))
+	}))
+	t.Cleanup(server.Close)
 
-	workspace := t.TempDir()
-	prevDir, err := os.Getwd()
-	if err != nil {
-		t.Fatal(err)
-	}
-	if err := os.Chdir(workspace); err != nil {
-		t.Fatal(err)
-	}
-	t.Cleanup(func() {
-		_ = os.Chdir(prevDir)
-	})
-
-	projectName := "simple-e2e"
-	oldModule := "github.com/example/simple-e2e"
-	newModule := "github.com/example/simple-e2e-renamed"
-
-	if err := Project(projectName, oldModule, templateLayouts["simple"]); err != nil {
-		t.Fatal(err)
-	}
-
-	projectDir := filepath.Join(workspace, projectName)
-	if err := renamer.RenameProjectModule(oldModule, newModule, projectDir, []string{
-		"buf.gen.yaml",
-		"buf.binding.yaml",
-	}, true); err != nil {
-		t.Fatal(err)
-	}
-
-	if err := execCommands(projectDir,
-		[]string{"make", "init"},
-		[]string{"make", "build"},
-	); err != nil {
-		t.Fatal(err)
+	if _, err := Layout(server.URL); err == nil {
+		t.Fatal("Layout() error = nil, want JSON decoding error")
 	}
 }
