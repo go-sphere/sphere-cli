@@ -1,9 +1,14 @@
 package create
 
 import (
+	"encoding/json"
 	"net/http"
 	"net/http/httptest"
+	"os"
+	"os/exec"
+	"path/filepath"
 	"reflect"
+	"strings"
 	"testing"
 )
 
@@ -15,25 +20,46 @@ func TestLayoutBuiltIn(t *testing.T) {
 		{
 			name: "",
 			want: TemplateLayout{
-				URI:  "https://github.com/go-sphere/sphere-layout/archive/refs/heads/master.zip",
-				Mod:  "github.com/go-sphere/sphere-layout",
-				Path: "sphere-layout-master",
+				Name:   "standard",
+				Source: "https://github.com/go-sphere/sphere-layout.git",
+				Ref:    "master",
+				Mod:    "github.com/go-sphere/sphere-layout",
+			},
+		},
+		{
+			name: "standard",
+			want: TemplateLayout{
+				Name:   "standard",
+				Source: "https://github.com/go-sphere/sphere-layout.git",
+				Ref:    "master",
+				Mod:    "github.com/go-sphere/sphere-layout",
 			},
 		},
 		{
 			name: "bun",
 			want: TemplateLayout{
-				URI:  "https://github.com/go-sphere/sphere-bun-layout/archive/refs/heads/master.zip",
-				Mod:  "github.com/go-sphere/sphere-bun-layout",
-				Path: "sphere-bun-layout-master",
+				Name:   "bun",
+				Source: "https://github.com/go-sphere/sphere-bun-layout.git",
+				Ref:    "master",
+				Mod:    "github.com/go-sphere/sphere-bun-layout",
 			},
 		},
 		{
 			name: "simple",
 			want: TemplateLayout{
-				URI:  "https://github.com/go-sphere/sphere-simple-layout/archive/refs/heads/master.zip",
-				Mod:  "github.com/go-sphere/sphere-simple-layout",
-				Path: "sphere-simple-layout-master",
+				Name:   "simple",
+				Source: "https://github.com/go-sphere/sphere-simple-layout.git",
+				Ref:    "master",
+				Mod:    "github.com/go-sphere/sphere-simple-layout",
+			},
+		},
+		{
+			name: "telegram",
+			want: TemplateLayout{
+				Name:   "telegram",
+				Source: "https://github.com/go-sphere/sphere-telegram-layout.git",
+				Ref:    "master",
+				Mod:    "github.com/go-sphere/sphere-telegram-layout",
 			},
 		},
 	}
@@ -59,6 +85,12 @@ func TestLayoutRemote(t *testing.T) {
 		wantErr string
 	}{
 		{
+			name:   "valid Git layout",
+			status: http.StatusOK,
+			body:   `{"name":"custom","source":"https://example.com/layout.git","ref":"main","mod":"example.com/layout"}`,
+			want:   &TemplateLayout{Name: "custom", Source: "https://example.com/layout.git", Ref: "main", Mod: "example.com/layout"},
+		},
+		{
 			name:   "valid",
 			status: http.StatusOK,
 			body:   `{"uri":"https://example.com/layout.zip","mod":"example.com/layout","path":"layout-main"}`,
@@ -73,6 +105,12 @@ func TestLayoutRemote(t *testing.T) {
 			name:    "missing required field",
 			status:  http.StatusOK,
 			body:    `{"uri":"https://example.com/layout.zip","mod":"example.com/layout"}`,
+			wantErr: "invalid layout configuration",
+		},
+		{
+			name:    "Git layout missing ref",
+			status:  http.StatusOK,
+			body:    `{"name":"custom","source":"https://example.com/layout.git","mod":"example.com/layout"}`,
 			wantErr: "invalid layout configuration",
 		},
 	}
@@ -102,6 +140,81 @@ func TestLayoutRemote(t *testing.T) {
 			}
 		})
 	}
+}
+
+func TestProjectFromGitSourceWritesExactLockAndCleanCommit(t *testing.T) {
+	source := filepath.Join(t.TempDir(), "source")
+	if err := os.MkdirAll(filepath.Join(source, ".sphere"), 0o755); err != nil {
+		t.Fatalf("create source: %v", err)
+	}
+	writeFixtureFile(t, filepath.Join(source, "go.mod"), "module example.com/layout\n\ngo 1.26.0\n")
+	writeFixtureFile(t, filepath.Join(source, "main.go"), "package main\n\nfunc main() {}\n")
+	writeFixtureFile(t, filepath.Join(source, "buf.gen.yaml"), "module: example.com/layout\n")
+	writeFixtureFile(t, filepath.Join(source, "buf.binding.yaml"), "module: example.com/layout\n")
+	writeFixtureFile(t, filepath.Join(source, "Makefile"), "init:\n\t@true\n")
+	writeFixtureFile(t, filepath.Join(source, ".sphere", "layout.json"), `{ "schema_version": 1, "name": "fixture" }`)
+
+	runGit(t, source, "init", "-b", "master")
+	runGit(t, source, "add", ".")
+	runGit(t, source, "-c", "user.name=Sphere Test", "-c", "user.email=sphere@example.com", "commit", "-m", "fixture")
+	revision := strings.TrimSpace(runGit(t, source, "rev-parse", "HEAD"))
+
+	t.Setenv("GIT_AUTHOR_NAME", "Sphere Test")
+	t.Setenv("GIT_AUTHOR_EMAIL", "sphere@example.com")
+	t.Setenv("GIT_COMMITTER_NAME", "Sphere Test")
+	t.Setenv("GIT_COMMITTER_EMAIL", "sphere@example.com")
+	workspace := t.TempDir()
+	t.Chdir(workspace)
+	layout := &TemplateLayout{
+		Name:   "fixture",
+		Source: source,
+		Ref:    "master",
+		Mod:    "example.com/layout",
+	}
+	if err := Project("generated", "example.com/project", layout); err != nil {
+		t.Fatalf("Project() error = %v", err)
+	}
+
+	projectDir := filepath.Join(workspace, "generated")
+	raw, err := os.ReadFile(filepath.Join(projectDir, ".sphere", "layout.lock.json"))
+	if err != nil {
+		t.Fatalf("read layout lock: %v", err)
+	}
+	var lock LayoutLock
+	if err := json.Unmarshal(raw, &lock); err != nil {
+		t.Fatalf("decode layout lock: %v", err)
+	}
+	if lock.SchemaVersion != 1 || lock.Name != "fixture" || lock.BaseRevision != revision || lock.Repository != source || lock.Ref != "master" || lock.UpstreamModule != "example.com/layout" {
+		t.Fatalf("unexpected layout lock: %+v", lock)
+	}
+	moduleFile, err := os.ReadFile(filepath.Join(projectDir, "go.mod"))
+	if err != nil {
+		t.Fatalf("read project go.mod: %v", err)
+	}
+	if !strings.HasPrefix(string(moduleFile), "module example.com/project\n") {
+		t.Fatalf("module was not renamed: %s", moduleFile)
+	}
+	if status := strings.TrimSpace(runGit(t, projectDir, "status", "--porcelain")); status != "" {
+		t.Fatalf("created project is dirty: %s", status)
+	}
+}
+
+func writeFixtureFile(t *testing.T, path, content string) {
+	t.Helper()
+	if err := os.WriteFile(path, []byte(content), 0o644); err != nil {
+		t.Fatalf("write %s: %v", path, err)
+	}
+}
+
+func runGit(t *testing.T, dir string, args ...string) string {
+	t.Helper()
+	command := exec.Command("git", args...)
+	command.Dir = dir
+	output, err := command.CombinedOutput()
+	if err != nil {
+		t.Fatalf("git %s: %v\n%s", strings.Join(args, " "), err, output)
+	}
+	return string(output)
 }
 
 func TestLayoutRemoteRejectsMalformedJSON(t *testing.T) {

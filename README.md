@@ -1,6 +1,6 @@
 # Sphere CLI
 
-Sphere CLI (`sphere-cli`) is a small bootstrap tool for [Sphere](https://github.com/go-sphere/sphere) projects. Its main job is to create projects from templates, list available templates, rename module paths, and provide a few lightweight generation helpers.
+Sphere CLI (`sphere-cli`) is a small bootstrap tool for [Sphere](https://github.com/go-sphere/sphere) projects. Its main job is to create projects from templates, record the exact template revision, list available templates, rename module paths, and provide a few lightweight generation helpers.
 
 It is intentionally not the primary build, deploy, or runtime orchestration tool. After a project is created, day-to-day work should happen through the template Makefile, Buf, Go, Docker, and other mature tools already used by the Go ecosystem.
 
@@ -17,6 +17,7 @@ go install github.com/go-sphere/sphere-cli@latest
 `sphere-cli` is responsible for:
 
 - creating projects from official or custom layout templates;
+- recording the source layout and exact Git commit in `.sphere/layout.lock.json`;
 - listing available project templates;
 - renaming Go module paths after project creation;
 - generating small service skeletons when convenient.
@@ -62,6 +63,12 @@ sphere-cli create --name <project-name> [--module <go-module-name>] [--layout <t
 - `--name string`: Required project directory name.
 - `--module string`: Optional Go module path. Defaults to the project name when omitted.
 - `--layout string`: Optional layout name or custom template layout URI.
+
+Official layout names are `standard` (the default), `simple`, `bun`, and
+`telegram`. Official layouts are cloned from their configured Git ref so the
+created project records an exact upstream commit. Legacy custom JSON using
+`uri`, `mod`, and `path` remains supported, but ZIP-only sources do not produce
+a synchronization lock.
 
 **Example:**
 
@@ -160,6 +167,14 @@ make run
 make lint
 make build
 ```
+
+## Layout Updates
+
+The CLI intentionally does not merge template updates. AI agents use
+`.sphere/layout.json` for ownership boundaries and `.sphere/layout.lock.json`
+for the exact base revision, then follow the synchronization protocol in the
+standard layout's `docs/LAYOUT_CONTRACT.md`. The lock must advance only after
+the merged project regenerates, tests, lints, and builds successfully.
 
 ## License
 

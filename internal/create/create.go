@@ -16,9 +16,21 @@ import (
 )
 
 type TemplateLayout struct {
-	URI  string `json:"uri,omitempty"`
-	Mod  string `json:"mod,omitempty"`
-	Path string `json:"path,omitempty"`
+	Name   string `json:"name,omitempty"`
+	Source string `json:"source,omitempty"`
+	Ref    string `json:"ref,omitempty"`
+	URI    string `json:"uri,omitempty"`
+	Mod    string `json:"mod,omitempty"`
+	Path   string `json:"path,omitempty"`
+}
+
+type LayoutLock struct {
+	SchemaVersion  int    `json:"schema_version"`
+	Name           string `json:"name"`
+	Repository     string `json:"repository"`
+	Ref            string `json:"ref"`
+	UpstreamModule string `json:"upstream_module"`
+	BaseRevision   string `json:"base_revision"`
 }
 
 type LayoutItem struct {
@@ -29,24 +41,39 @@ type LayoutItem struct {
 
 var templateLayouts = map[string]*TemplateLayout{
 	"": {
-		URI:  "https://github.com/go-sphere/sphere-layout/archive/refs/heads/master.zip",
-		Mod:  "github.com/go-sphere/sphere-layout",
-		Path: "sphere-layout-master",
+		Name:   "standard",
+		Source: "https://github.com/go-sphere/sphere-layout.git",
+		Ref:    "master",
+		Mod:    "github.com/go-sphere/sphere-layout",
+	},
+	"standard": {
+		Name:   "standard",
+		Source: "https://github.com/go-sphere/sphere-layout.git",
+		Ref:    "master",
+		Mod:    "github.com/go-sphere/sphere-layout",
 	},
 	"bun": {
-		URI:  "https://github.com/go-sphere/sphere-bun-layout/archive/refs/heads/master.zip",
-		Mod:  "github.com/go-sphere/sphere-bun-layout",
-		Path: "sphere-bun-layout-master",
+		Name:   "bun",
+		Source: "https://github.com/go-sphere/sphere-bun-layout.git",
+		Ref:    "master",
+		Mod:    "github.com/go-sphere/sphere-bun-layout",
 	},
 	"simple": {
-		URI:  "https://github.com/go-sphere/sphere-simple-layout/archive/refs/heads/master.zip",
-		Mod:  "github.com/go-sphere/sphere-simple-layout",
-		Path: "sphere-simple-layout-master",
+		Name:   "simple",
+		Source: "https://github.com/go-sphere/sphere-simple-layout.git",
+		Ref:    "master",
+		Mod:    "github.com/go-sphere/sphere-simple-layout",
+	},
+	"telegram": {
+		Name:   "telegram",
+		Source: "https://github.com/go-sphere/sphere-telegram-layout.git",
+		Ref:    "master",
+		Mod:    "github.com/go-sphere/sphere-telegram-layout",
 	},
 }
 
 func Project(name, mod string, layout *TemplateLayout) error {
-	if layout == nil {
+	if err := validateLayout(layout); err != nil {
 		return errors.New("invalid layout")
 	}
 	targetDir, err := filepath.Abs(filepath.Join(".", name))
@@ -54,35 +81,85 @@ func Project(name, mod string, layout *TemplateLayout) error {
 		return err
 	}
 
-	// download and unzip the default project layout
-	tempDir, err := zip.DownloadAndUnzip(layout.URI)
+	layoutDir, cleanup, revision, err := materializeLayout(layout)
 	if err != nil {
 		return err
 	}
-	defer func() {
-		_ = os.RemoveAll(tempDir)
-	}()
-	layoutDir := filepath.Join(tempDir, layout.Path)
+	defer cleanup()
 
-	// init git repository
-	err = initGitRepo(layoutDir)
-	if err != nil {
-		return err
-	}
-
-	// rename the Go module name
 	err = renameGoModule(layout.Mod, mod, layoutDir)
 	if err != nil {
 		return err
 	}
 
-	// Move the layout to the target directory
+	if revision != "" {
+		if err := writeLayoutLock(layoutDir, layout, revision); err != nil {
+			return err
+		}
+	}
+
+	if err := initGitRepo(layoutDir); err != nil {
+		return err
+	}
+
 	err = moveTempDirToTarget(layoutDir, targetDir)
 	if err != nil {
 		return err
 	}
 
 	return nil
+}
+
+func materializeLayout(layout *TemplateLayout) (string, func(), string, error) {
+	if layout.Source != "" {
+		tempDir, err := os.MkdirTemp("", "sphere-layout-")
+		if err != nil {
+			return "", func() {}, "", err
+		}
+		cleanup := func() { _ = os.RemoveAll(tempDir) }
+		layoutDir := filepath.Join(tempDir, "layout")
+		if _, err := execCommand(tempDir, "git", "clone", "--depth", "1", "--single-branch", "--branch", layout.Ref, layout.Source, layoutDir); err != nil {
+			cleanup()
+			return "", func() {}, "", err
+		}
+		revision, err := execCommand(layoutDir, "git", "rev-parse", "HEAD")
+		if err != nil {
+			cleanup()
+			return "", func() {}, "", err
+		}
+		if err := os.RemoveAll(filepath.Join(layoutDir, ".git")); err != nil {
+			cleanup()
+			return "", func() {}, "", err
+		}
+		return layoutDir, cleanup, strings.TrimSpace(revision), nil
+	}
+
+	tempDir, err := zip.DownloadAndUnzip(layout.URI)
+	if err != nil {
+		return "", func() {}, "", err
+	}
+	return filepath.Join(tempDir, layout.Path), func() { _ = os.RemoveAll(tempDir) }, "", nil
+}
+
+func writeLayoutLock(layoutDir string, layout *TemplateLayout, revision string) error {
+	lock := LayoutLock{
+		SchemaVersion:  1,
+		Name:           layout.Name,
+		Repository:     layout.Source,
+		Ref:            layout.Ref,
+		UpstreamModule: layout.Mod,
+		BaseRevision:   revision,
+	}
+	raw, err := json.MarshalIndent(lock, "", "  ")
+	if err != nil {
+		return err
+	}
+	raw = append(raw, '\n')
+	lockDir := filepath.Join(layoutDir, ".sphere")
+	if err := os.MkdirAll(lockDir, 0o755); err != nil {
+		return err
+	}
+	return os.WriteFile(filepath.Join(lockDir, "layout.lock.json"), raw, 0o644)
 }
 
 func Layout(nameOrUri string) (*TemplateLayout, error) {
@@ -107,10 +184,26 @@ func Layout(nameOrUri string) (*TemplateLayout, error) {
 	if err != nil {
 		return nil, err
 	}
-	if layout.URI == "" || layout.Mod == "" || layout.Path == "" {
+	if err := validateLayout(&layout); err != nil {
 		return nil, errors.New("invalid layout configuration")
 	}
 	return &layout, nil
+}
+
+func validateLayout(layout *TemplateLayout) error {
+	if layout == nil || layout.Mod == "" {
+		return errors.New("missing module")
+	}
+	if layout.Source != "" {
+		if layout.Name == "" || layout.Ref == "" {
+			return errors.New("git layouts require name and ref")
+		}
+		return nil
+	}
+	if layout.URI == "" || layout.Path == "" {
+		return errors.New("zip layouts require uri and path")
+	}
+	return nil
 }
 
 func LayoutList() ([]*LayoutItem, error) {
@@ -178,7 +271,10 @@ func execCommand(dir string, name string, arg ...string) (string, error) {
 	var stdout strings.Builder
 	cmd.Stdout = &stdout
 	cmd.Stderr = os.Stderr
-	return stdout.String(), cmd.Run()
+	if err := cmd.Run(); err != nil {
+		return stdout.String(), err
+	}
+	return stdout.String(), nil
 }
 
 func execCommands(dir string, commands ...[]string) error {
