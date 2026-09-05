@@ -1,6 +1,8 @@
 package create
 
 import (
+	"archive/zip"
+	"bytes"
 	"encoding/json"
 	"net/http"
 	"net/http/httptest"
@@ -142,35 +144,45 @@ func TestLayoutRemote(t *testing.T) {
 	}
 }
 
-func TestProjectFromGitSourceWritesExactLockAndCleanCommit(t *testing.T) {
+func TestProjectFromOfficialGitLayoutsWritesExactLockAndCleanCommit(t *testing.T) {
+	for _, layoutName := range []string{"standard", "bun", "simple", "telegram"} {
+		t.Run(layoutName, func(t *testing.T) {
+			layout, err := Layout(layoutName)
+			if err != nil {
+				t.Fatalf("Layout(%q) error = %v", layoutName, err)
+			}
+			source, revision := createGitLayoutFixture(t, layout.Mod, layout.Name)
+			localLayout := *layout
+			localLayout.Source = source
+			assertGitProjectCreation(t, &localLayout, revision)
+		})
+	}
+}
+
+func createGitLayoutFixture(t *testing.T, module, name string) (string, string) {
+	t.Helper()
 	source := filepath.Join(t.TempDir(), "source")
 	if err := os.MkdirAll(filepath.Join(source, ".sphere"), 0o755); err != nil {
 		t.Fatalf("create source: %v", err)
 	}
-	writeFixtureFile(t, filepath.Join(source, "go.mod"), "module example.com/layout\n\ngo 1.26.0\n")
+	writeFixtureFile(t, filepath.Join(source, "go.mod"), "module "+module+"\n\ngo 1.26.0\n")
 	writeFixtureFile(t, filepath.Join(source, "main.go"), "package main\n\nfunc main() {}\n")
-	writeFixtureFile(t, filepath.Join(source, "buf.gen.yaml"), "module: example.com/layout\n")
-	writeFixtureFile(t, filepath.Join(source, "buf.binding.yaml"), "module: example.com/layout\n")
+	writeFixtureFile(t, filepath.Join(source, "buf.gen.yaml"), "module: "+module+"\n")
+	writeFixtureFile(t, filepath.Join(source, "buf.binding.yaml"), "module: "+module+"\n")
 	writeFixtureFile(t, filepath.Join(source, "Makefile"), "init:\n\t@true\n")
-	writeFixtureFile(t, filepath.Join(source, ".sphere", "layout.json"), `{ "schema_version": 1, "name": "fixture" }`)
+	writeFixtureFile(t, filepath.Join(source, ".sphere", "layout.json"), `{ "schema_version": 1, "name": "`+name+`" }`)
 
 	runGit(t, source, "init", "-b", "master")
 	runGit(t, source, "add", ".")
 	runGit(t, source, "-c", "user.name=Sphere Test", "-c", "user.email=sphere@example.com", "commit", "-m", "fixture")
-	revision := strings.TrimSpace(runGit(t, source, "rev-parse", "HEAD"))
+	return source, strings.TrimSpace(runGit(t, source, "rev-parse", "HEAD"))
+}
 
-	t.Setenv("GIT_AUTHOR_NAME", "Sphere Test")
-	t.Setenv("GIT_AUTHOR_EMAIL", "sphere@example.com")
-	t.Setenv("GIT_COMMITTER_NAME", "Sphere Test")
-	t.Setenv("GIT_COMMITTER_EMAIL", "sphere@example.com")
+func assertGitProjectCreation(t *testing.T, layout *TemplateLayout, revision string) {
+	t.Helper()
+	setGitIdentity(t)
 	workspace := t.TempDir()
 	t.Chdir(workspace)
-	layout := &TemplateLayout{
-		Name:   "fixture",
-		Source: source,
-		Ref:    "master",
-		Mod:    "example.com/layout",
-	}
 	if err := Project("generated", "example.com/project", layout); err != nil {
 		t.Fatalf("Project() error = %v", err)
 	}
@@ -184,7 +196,7 @@ func TestProjectFromGitSourceWritesExactLockAndCleanCommit(t *testing.T) {
 	if err := json.Unmarshal(raw, &lock); err != nil {
 		t.Fatalf("decode layout lock: %v", err)
 	}
-	if lock.SchemaVersion != 1 || lock.Name != "fixture" || lock.BaseRevision != revision || lock.Repository != source || lock.Ref != "master" || lock.UpstreamModule != "example.com/layout" {
+	if lock.SchemaVersion != 1 || lock.Name != layout.Name || lock.BaseRevision != revision || lock.Repository != layout.Source || lock.Ref != layout.Ref || lock.UpstreamModule != layout.Mod {
 		t.Fatalf("unexpected layout lock: %+v", lock)
 	}
 	moduleFile, err := os.ReadFile(filepath.Join(projectDir, "go.mod"))
@@ -197,6 +209,68 @@ func TestProjectFromGitSourceWritesExactLockAndCleanCommit(t *testing.T) {
 	if status := strings.TrimSpace(runGit(t, projectDir, "status", "--porcelain")); status != "" {
 		t.Fatalf("created project is dirty: %s", status)
 	}
+}
+
+func TestProjectFromLegacyZipRemainsCompatibleWithoutLock(t *testing.T) {
+	var archive bytes.Buffer
+	zipWriter := zip.NewWriter(&archive)
+	files := map[string]string{
+		"layout-main/go.mod":           "module example.com/layout\n\ngo 1.26.0\n",
+		"layout-main/main.go":          "package main\n\nfunc main() {}\n",
+		"layout-main/buf.gen.yaml":     "module: example.com/layout\n",
+		"layout-main/buf.binding.yaml": "module: example.com/layout\n",
+		"layout-main/Makefile":         "init:\n\t@true\n",
+	}
+	for path, content := range files {
+		file, err := zipWriter.Create(path)
+		if err != nil {
+			t.Fatalf("create ZIP entry: %v", err)
+		}
+		if _, err := file.Write([]byte(content)); err != nil {
+			t.Fatalf("write ZIP entry: %v", err)
+		}
+	}
+	if err := zipWriter.Close(); err != nil {
+		t.Fatalf("close ZIP: %v", err)
+	}
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		_, _ = w.Write(archive.Bytes())
+	}))
+	t.Cleanup(server.Close)
+
+	setGitIdentity(t)
+	workspace := t.TempDir()
+	t.Chdir(workspace)
+	layout := &TemplateLayout{
+		URI:  server.URL,
+		Mod:  "example.com/layout",
+		Path: "layout-main",
+	}
+	if err := Project("generated", "example.com/project", layout); err != nil {
+		t.Fatalf("Project() error = %v", err)
+	}
+	projectDir := filepath.Join(workspace, "generated")
+	if _, err := os.Stat(filepath.Join(projectDir, ".sphere", "layout.lock.json")); !os.IsNotExist(err) {
+		t.Fatalf("legacy ZIP unexpectedly produced a synchronization lock: %v", err)
+	}
+	moduleFile, err := os.ReadFile(filepath.Join(projectDir, "go.mod"))
+	if err != nil {
+		t.Fatalf("read project go.mod: %v", err)
+	}
+	if !strings.HasPrefix(string(moduleFile), "module example.com/project\n") {
+		t.Fatalf("module was not renamed: %s", moduleFile)
+	}
+	if status := strings.TrimSpace(runGit(t, projectDir, "status", "--porcelain")); status != "" {
+		t.Fatalf("created project is dirty: %s", status)
+	}
+}
+
+func setGitIdentity(t *testing.T) {
+	t.Helper()
+	t.Setenv("GIT_AUTHOR_NAME", "Sphere Test")
+	t.Setenv("GIT_AUTHOR_EMAIL", "sphere@example.com")
+	t.Setenv("GIT_COMMITTER_NAME", "Sphere Test")
+	t.Setenv("GIT_COMMITTER_EMAIL", "sphere@example.com")
 }
 
 func writeFixtureFile(t *testing.T, path, content string) {
