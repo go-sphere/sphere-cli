@@ -301,3 +301,94 @@ func TestLayoutRemoteRejectsMalformedJSON(t *testing.T) {
 		t.Fatal("Layout() error = nil, want JSON decoding error")
 	}
 }
+
+func TestProjectFailsWhenTargetDirectoryExists(t *testing.T) {
+	setGitIdentity(t)
+	source, _ := createGitLayoutFixture(t, "example.com/layout", "standard")
+	workspace := t.TempDir()
+	t.Chdir(workspace)
+
+	layout := &TemplateLayout{Name: "standard", Source: source, Ref: "master", Mod: "example.com/layout"}
+	if err := Project("app", "example.com/app", layout); err != nil {
+		t.Fatalf("first Project() error = %v", err)
+	}
+	err := Project("app", "example.com/app", layout)
+	if err == nil || !strings.Contains(err.Error(), "already exists") {
+		t.Fatalf("second Project() error = %v, want 'already exists'", err)
+	}
+}
+
+func TestEnsureGitIdentityRequiresConfiguredIdentity(t *testing.T) {
+	// Blank out every identity source: env vars, user config, and system config.
+	t.Setenv("GIT_AUTHOR_NAME", "")
+	t.Setenv("GIT_AUTHOR_EMAIL", "")
+	t.Setenv("GIT_COMMITTER_NAME", "")
+	t.Setenv("GIT_COMMITTER_EMAIL", "")
+	t.Setenv("GIT_CONFIG_GLOBAL", os.DevNull)
+	t.Setenv("GIT_CONFIG_SYSTEM", os.DevNull)
+
+	if err := ensureGitIdentity(); err == nil {
+		t.Fatal("ensureGitIdentity() error = nil, want missing-identity error")
+	} else if !strings.Contains(err.Error(), "git commit identity") {
+		t.Fatalf("ensureGitIdentity() error = %v, want actionable identity message", err)
+	}
+}
+
+func TestProjectCustomLayoutWithoutBufFilesSucceeds(t *testing.T) {
+	// A custom layout is not required to ship buf.gen.yaml / buf.binding.yaml;
+	// missing related files must not abort project creation.
+	setGitIdentity(t)
+	source := filepath.Join(t.TempDir(), "source")
+	if err := os.MkdirAll(source, 0o755); err != nil {
+		t.Fatalf("mkdir source: %v", err)
+	}
+	writeFixtureFile(t, filepath.Join(source, "go.mod"), "module example.com/custom\n\ngo 1.26.0\n")
+	writeFixtureFile(t, filepath.Join(source, "main.go"), "package main\n\nfunc main() {}\n")
+	writeFixtureFile(t, filepath.Join(source, "Makefile"), "init:\n\t@true\n")
+	runGit(t, source, "init", "-b", "main")
+	runGit(t, source, "add", ".")
+	runGit(t, source, "-c", "user.name=Sphere Test", "-c", "user.email=sphere@example.com", "commit", "-m", "fixture")
+
+	workspace := t.TempDir()
+	t.Chdir(workspace)
+	layout := &TemplateLayout{Name: "custom", Source: source, Ref: "main", Mod: "example.com/custom"}
+	if err := Project("generated", "example.com/project", layout); err != nil {
+		t.Fatalf("Project() without buf files error = %v", err)
+	}
+	if _, err := os.Stat(filepath.Join(workspace, "generated", "go.mod")); err != nil {
+		t.Fatalf("generated project missing: %v", err)
+	}
+}
+
+func TestProjectReportsLayoutValidationDetail(t *testing.T) {
+	workspace := t.TempDir()
+	t.Chdir(workspace)
+	err := Project("app", "example.com/app", &TemplateLayout{Mod: "example.com/x"})
+	if err == nil || !strings.Contains(err.Error(), "zip layouts require uri and path") {
+		t.Fatalf("Project() error = %v, want detailed validation error", err)
+	}
+}
+
+func TestCopyDirContentsPreservesFilesDirsAndSymlinks(t *testing.T) {
+	source := t.TempDir()
+	if err := os.MkdirAll(filepath.Join(source, "sub", "deep"), 0o755); err != nil {
+		t.Fatalf("mkdir fixture: %v", err)
+	}
+	writeFixtureFile(t, filepath.Join(source, "a.txt"), "hello")
+	writeFixtureFile(t, filepath.Join(source, "sub", "b.txt"), "world")
+	writeFixtureFile(t, filepath.Join(source, "sub", "deep", "c.txt"), "!")
+	target := filepath.Join(t.TempDir(), "out")
+	if err := copyDirContents(source, target); err != nil {
+		t.Fatalf("copyDirContents() error = %v", err)
+	}
+	for _, rel := range []string{"a.txt", "sub/b.txt", "sub/deep/c.txt"} {
+		data, err := os.ReadFile(filepath.Join(target, rel))
+		if err != nil {
+			t.Errorf("read copied %s: %v", rel, err)
+			continue
+		}
+		if len(data) == 0 {
+			t.Errorf("copied %s is empty", rel)
+		}
+	}
+}

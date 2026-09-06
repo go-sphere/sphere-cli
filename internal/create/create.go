@@ -3,12 +3,15 @@ package create
 import (
 	"encoding/json"
 	"errors"
+	"fmt"
+	"io/fs"
 	"log"
 	"net/http"
 	"os"
 	"os/exec"
 	"path/filepath"
 	"strings"
+	"syscall"
 	"time"
 
 	"github.com/go-sphere/sphere-cli/internal/renamer"
@@ -74,11 +77,14 @@ var templateLayouts = map[string]*TemplateLayout{
 
 func Project(name, mod string, layout *TemplateLayout) error {
 	if err := validateLayout(layout); err != nil {
-		return errors.New("invalid layout")
+		return fmt.Errorf("invalid layout: %w", err)
 	}
 	targetDir, err := filepath.Abs(filepath.Join(".", name))
 	if err != nil {
 		return err
+	}
+	if _, err := os.Stat(targetDir); err == nil {
+		return fmt.Errorf("target directory already exists: %s", targetDir)
 	}
 
 	layoutDir, cleanup, revision, err := materializeLayout(layout)
@@ -228,15 +234,61 @@ func LayoutList() ([]*LayoutItem, error) {
 	return layouts, nil
 }
 
+// moveTempDirToTarget moves source onto target. Layouts are materialized under
+// the system temporary directory, which may live on a different filesystem than
+// the target (e.g. TMPDIR on a separate mount); os.Rename then fails with
+// EXDEV. Falling back to a recursive copy keeps project creation working
+// regardless of where TMPDIR points.
 func moveTempDirToTarget(source, target string) error {
 	err := os.Rename(source, target)
-	if err != nil {
+	if err == nil {
+		return nil
+	}
+	if !errors.Is(err, syscall.EXDEV) {
 		return err
+	}
+	if err := copyDirContents(source, target); err != nil {
+		return fmt.Errorf("move layout across devices: %w", err)
 	}
 	return nil
 }
 
+func copyDirContents(source, target string) error {
+	return filepath.WalkDir(source, func(path string, d fs.DirEntry, err error) error {
+		if err != nil {
+			return err
+		}
+		rel, err := filepath.Rel(source, path)
+		if err != nil {
+			return err
+		}
+		dest := filepath.Join(target, rel)
+		if d.IsDir() {
+			return os.MkdirAll(dest, 0o755)
+		}
+		info, err := d.Info()
+		if err != nil {
+			return err
+		}
+		if info.Mode()&os.ModeSymlink != 0 {
+			link, err := os.Readlink(path)
+			if err != nil {
+				return err
+			}
+			return os.Symlink(link, dest)
+		}
+		data, err := os.ReadFile(path)
+		if err != nil {
+			return err
+		}
+		return os.WriteFile(dest, data, info.Mode().Perm())
+	})
+}
+
 func initGitRepo(target string) error {
+	if err := ensureGitIdentity(); err != nil {
+		return err
+	}
 	return execCommands(target,
 		[]string{"git", "init"},
 		[]string{"git", "add", "."},
@@ -244,12 +296,22 @@ func initGitRepo(target string) error {
 	)
 }
 
+// ensureGitIdentity verifies that a commit identity is available before any
+// commit is attempted, so users without a configured git identity get a clear
+// message instead of an obscure failure from `git commit`.
+func ensureGitIdentity() error {
+	if _, err := execCommand("", "git", "var", "GIT_COMMITTER_IDENT"); err != nil {
+		return errors.New("git commit identity is not configured: set git user.name and user.email, or export GIT_AUTHOR_NAME/GIT_AUTHOR_EMAIL and GIT_COMMITTER_NAME/GIT_COMMITTER_EMAIL")
+	}
+	return nil
+}
+
 func renameGoModule(oldModName, newModName, target string) error {
 	log.Printf("rename module: %s -> %s", oldModName, newModName)
 	if err := renamer.RenameProjectModule(oldModName, newModName, target, []string{
 		"buf.gen.yaml",
 		"buf.binding.yaml",
-	}, false); err != nil {
+	}, true); err != nil {
 		return err
 	}
 	err := execCommands(target,

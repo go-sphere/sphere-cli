@@ -12,9 +12,15 @@ import (
 	"time"
 )
 
-const (
-	httpTimeout     = 90 * time.Second
-	maxZipSizeBytes = 100 << 20 // 100 MiB
+const httpTimeout = 90 * time.Second
+
+const maxZipSizeBytes = 100 << 20 // 100 MiB download cap
+
+// Extraction limits. Kept as variables so tests can shrink them.
+var (
+	maxZipEntries                    = 10_000
+	maxUncompressedEntryBytes uint64 = 500 << 20 // 500 MiB per entry after decompression
+	maxUncompressedTotalBytes uint64 = 1 << 30   // 1 GiB total after decompression
 )
 
 func downloadZipReader(url string) (*zip.Reader, func(), error) {
@@ -80,7 +86,36 @@ func ensureSafePath(tempDir, fileName string) (string, error) {
 	return filePath, nil
 }
 
-func unzipFile(file *zip.File, tempDir string) error {
+// countingWriter writes through to w and fails once total exceeds limit. It is
+// used as a belt-and-braces cap on top of the zip header size checks.
+type countingWriter struct {
+	w     io.Writer
+	n     int64
+	limit int64
+}
+
+func (cw *countingWriter) Write(p []byte) (int, error) {
+	if cw.n+int64(len(p)) > cw.limit {
+		return 0, fmt.Errorf("uncompressed entry exceeds %d bytes", cw.limit)
+	}
+	n, err := cw.w.Write(p)
+	cw.n += int64(n)
+	return n, err
+}
+
+func unzipFile(file *zip.File, tempDir string, total *uint64) error {
+	if file.FileInfo().Mode()&os.ModeSymlink != 0 {
+		return fmt.Errorf("unsupported symlink entry: %s", file.Name)
+	}
+	// Pre-check the declared sizes from the zip header so oversized archives
+	// are rejected before any data is decompressed.
+	if file.UncompressedSize64 > maxUncompressedEntryBytes {
+		return fmt.Errorf("uncompressed entry too large: %s (%d bytes)", file.Name, file.UncompressedSize64)
+	}
+	if *total+file.UncompressedSize64 > maxUncompressedTotalBytes {
+		return fmt.Errorf("uncompressed archive too large: exceeds %d bytes", maxUncompressedTotalBytes)
+	}
+
 	filePath, err := ensureSafePath(tempDir, file.Name)
 	if err != nil {
 		return err
@@ -108,14 +143,15 @@ func unzipFile(file *zip.File, tempDir string) error {
 	defer func() {
 		_ = srcFile.Close()
 	}()
-	_, err = io.Copy(dstFile, srcFile)
+	_, err = io.Copy(&countingWriter{w: dstFile, limit: int64(maxUncompressedEntryBytes)}, srcFile)
 	if err != nil {
 		return err
 	}
+	*total += file.UncompressedSize64
 	return nil
 }
 
-func DownloadAndUnzip(url string) (string, error) {
+func DownloadAndUnzip(url string) (dir string, err error) {
 	zipReader, clean, err := downloadZipReader(url)
 	if err != nil {
 		return "", err
@@ -126,9 +162,19 @@ func DownloadAndUnzip(url string) (string, error) {
 	if err != nil {
 		return "", err
 	}
+	defer func() {
+		if err != nil {
+			_ = os.RemoveAll(tempDir)
+		}
+	}()
+
+	if len(zipReader.File) > maxZipEntries {
+		return "", fmt.Errorf("archive has too many entries: %d", len(zipReader.File))
+	}
+	var totalUncompressed uint64
 	for _, file := range zipReader.File {
-		if zErr := unzipFile(file, tempDir); zErr != nil {
-			return "", zErr
+		if err = unzipFile(file, tempDir, &totalUncompressed); err != nil {
+			return "", err
 		}
 	}
 	return tempDir, nil

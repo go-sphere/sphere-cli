@@ -60,8 +60,11 @@ func RenameModule(oldModule, newModule string, path string) error {
 		importSpec, ok := n.(*ast.ImportSpec)
 		if ok {
 			goPath := strings.Trim(importSpec.Path.Value, `"`)
-			if strings.HasPrefix(goPath, oldModule) {
-				newPath := strings.Replace(goPath, oldModule, newModule, 1)
+			// Only rewrite imports inside oldModule: the module itself or its
+			// subpackages. A plain prefix match would also rewrite a sibling
+			// module such as github.com/a/foobar when renaming github.com/a/foo.
+			if goPath == oldModule || strings.HasPrefix(goPath, oldModule+"/") {
+				newPath := newModule + strings.TrimPrefix(goPath, oldModule)
 				importSpec.Path.Value = `"` + newPath + `"`
 			}
 		}
