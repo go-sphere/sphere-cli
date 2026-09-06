@@ -43,25 +43,25 @@ message List{{plural .ServiceName}}Request {
 }
 
 message List{{plural .ServiceName}}Response {
-  repeated entpb.{{.ServiceName}} {{plural .EntityName}} = 1;
+  repeated entpb.{{.ServiceName}} {{.EntityPluralField}} = 1;
   int64 total_size = 2;
   int64 total_page = 3;
 }
 
 message Create{{.ServiceName}}Request {
-  entpb.{{.ServiceName}} {{.EntityName}} = 1;
+  entpb.{{.ServiceName}} {{.EntityField}} = 1;
 }
 
 message Create{{.ServiceName}}Response {
-  entpb.{{.ServiceName}} {{.EntityName}} = 1;
+  entpb.{{.ServiceName}} {{.EntityField}} = 1;
 }
 
 message Update{{.ServiceName}}Request {
-  entpb.{{.ServiceName}} {{.EntityName}} = 1;
+  entpb.{{.ServiceName}} {{.EntityField}} = 1;
 }
 
 message Update{{.ServiceName}}Response {
-  entpb.{{.ServiceName}} {{.EntityName}} = 1;
+  entpb.{{.ServiceName}} {{.EntityField}} = 1;
 }
 
 message Get{{.ServiceName}}Request {
@@ -69,7 +69,7 @@ message Get{{.ServiceName}}Request {
 }
 
 message Get{{.ServiceName}}Response {
-  entpb.{{.ServiceName}} {{.EntityName}} = 1;
+  entpb.{{.ServiceName}} {{.EntityField}} = 1;
 }
 
 message Delete{{.ServiceName}}Request {

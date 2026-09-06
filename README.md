@@ -117,6 +117,11 @@ sphere-cli service proto --name <service-name> [--package <package-name>]
 - `--name string`: Required service name.
 - `--package string`: Package name for the generated `.proto` file. Default: `dash.v1`.
 
+> The generated proto references `entpb.<Entity>` messages, so the entity must
+> already exist as an Ent schema and be annotated for `entproto` generation.
+> Like `service golang`, run this inside the project so `--name` is matched
+> against the real schema types (see the golang section below).
+
 #### `service golang`
 
 Generates a Go service implementation skeleton.
@@ -132,6 +137,21 @@ sphere-cli service golang --name <service-name> [--package <package-name>] [--mo
 - `--name string`: Required service name.
 - `--package string`: Package name for the generated Go code. Default: `dash.v1`.
 - `--mod string`: Go module path for generated imports. Default: `github.com/go-sphere/sphere-layout`.
+
+**Prerequisites.** The generated skeleton calls APIs produced by the project's
+own code generators (`entbind.CreateXxx`, `ent.Xxx.Create`, `s.render.Xxx`), so
+the entity must already exist as an Ent schema and the project must have run
+`make gen/proto` at least once. Run this command **inside the project
+directory**: the entity name is then matched against the real Ent schema types,
+which lets an undivided name like `keyvaluestore` resolve to the
+`KeyValueStore` schema. Outside a project (no schema directory) the name is
+Pascal-cased by inflection only, so pass multi-word entities in separated form
+(`key_value_store` or `key-value-store`) so they are split reliably.
+
+The generated skeleton is a plain CRUD starting point, not a finished service:
+real entities typically add field validation, password hashing, permission
+checks, and `IgnoreSetZeroField` options on update (see the CRUD services in
+the standard layout for reference).
 
 ### `rename`
 

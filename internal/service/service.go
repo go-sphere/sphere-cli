@@ -5,44 +5,43 @@ import (
 	"go/format"
 	"strings"
 	"text/template"
-
-	"github.com/go-openapi/inflect"
 )
 
 type serviceConfig struct {
 	ServiceName     string
+	ServiceFileName string
+	PluralName      string
 	PackagePath     string
 	ServicePackage  string
 	BizPackagePath  string
-	ServiceFileName string
 }
 
 //go:embed service.tmpl
 var serviceTemplate string
 
-func GenServiceGolang(name, pkg, mod string) (string, error) {
-
-	rules := inflect.NewDefaultRuleset()
+// GenServiceGolang generates a service implementation skeleton for the entity
+// named by `name`. When schemaDir points at an existing sphere schema
+// directory, the name is matched against the real schema types first (see
+// NormalizeEntity); otherwise inflection is used.
+func GenServiceGolang(name, pkg, mod, schemaDir string) (string, error) {
+	entity, _ := NormalizeEntity(name, schemaDir)
 
 	conf := serviceConfig{
-		ServiceName:     rules.Camelize(name),
+		ServiceName:     entity.TypeName,
+		ServiceFileName: entity.FileName,
+		PluralName:      entity.Plural,
 		PackagePath:     strings.Join(strings.Split(pkg, "."), "/"),
 		ServicePackage:  strings.ReplaceAll(pkg, ".", ""),
 		BizPackagePath:  mod,
-		ServiceFileName: strings.ToLower(name),
 	}
 
-	tmpl, err := template.New("service").Funcs(template.FuncMap{
-		"plural":  rules.Pluralize,
-		"toLower": strings.ToLower,
-	}).Parse(serviceTemplate)
+	tmpl, err := template.New("service").Parse(serviceTemplate)
 	if err != nil {
 		return "", err
 	}
 
 	var file strings.Builder
-	err = tmpl.Execute(&file, conf)
-	if err != nil {
+	if err := tmpl.Execute(&file, conf); err != nil {
 		return "", err
 	}
 
