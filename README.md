@@ -12,6 +12,27 @@ To install `sphere-cli`, ensure you have Go installed and run:
 go install github.com/go-sphere/sphere-cli@latest
 ```
 
+## Interactive mode
+
+When a command is run **without its required flags and both stdin/stdout are
+terminals**, `sphere-cli` launches an interactive wizard built with
+[bubbletea](https://github.com/charmbracelet/bubbletea):
+
+- `sphere-cli create` walks through template selection (fetched from the
+  remote catalog, with built-in fallback), the project name, the Go module
+  path, and optional steps (git init, dependency installation), then renders a
+  live progress bar while the template downloads and the project initializes.
+- `sphere-cli service proto` / `service golang` list the ent schemas detected
+  in the current project so the entity can be picked instead of typed, offer
+  sensible package/module defaults (module read from `go.mod`), show a
+  scrollable preview of the generated code, and let you choose between
+  printing to stdout and writing to a suggested path inside the project.
+- `sphere-cli rename` reads the current module from `go.mod` so only the new
+  module path has to be entered, then confirms before rewriting imports.
+
+All commands keep their flags for scripted use. When stdout is not a terminal
+(CI, pipes), the wizards are skipped automatically and the flags are required.
+
 ## Scope
 
 `sphere-cli` is responsible for:
@@ -55,14 +76,17 @@ Initializes a new Sphere project from a layout template.
 **Usage:**
 
 ```shell
-sphere-cli create --name <project-name> [--module <go-module-name>] [--layout <template-uri-or-name>]
+sphere-cli create                # interactive wizard in a terminal
+sphere-cli create --name <project-name> [--module <go-module-name>] [--layout <template-uri-or-name>] [--no-git] [--no-deps]
 ```
 
 **Flags:**
 
-- `--name string`: Required project directory name.
+- `--name string`: Required (scripted mode) project directory name.
 - `--module string`: Optional Go module path. Defaults to the project name when omitted.
 - `--layout string`: Optional layout name or custom template layout URI.
+- `--no-git`: Skip git repository initialization and the initial commit.
+- `--no-deps`: Skip dependency installation (`make init` + `go mod tidy`).
 
 Official layout names are `standard` (the default), `simple`, `bun`, and
 `telegram`. Official layouts are cloned from their configured Git ref so the
@@ -109,13 +133,15 @@ Generates a `.proto` file for a new service.
 **Usage:**
 
 ```shell
-sphere-cli service proto --name <service-name> [--package <package-name>]
+sphere-cli service proto                   # interactive wizard in a terminal
+sphere-cli service proto --name <service-name> [--package <package-name>] [--out <file>]
 ```
 
 **Flags:**
 
-- `--name string`: Required service name.
+- `--name string`: Required (scripted mode) service name.
 - `--package string`: Package name for the generated `.proto` file. Default: `dash.v1`.
+- `--out string`: Write the generated code to this file instead of stdout.
 
 > The generated proto references `entpb.<Entity>` messages, so the entity must
 > already exist as an Ent schema and be annotated for `entproto` generation.
@@ -129,14 +155,16 @@ Generates a Go service implementation skeleton.
 **Usage:**
 
 ```shell
-sphere-cli service golang --name <service-name> [--package <package-name>] [--mod <go-module-path>]
+sphere-cli service golang                   # interactive wizard in a terminal
+sphere-cli service golang --name <service-name> [--package <package-name>] [--mod <go-module-path>] [--out <file>]
 ```
 
 **Flags:**
 
-- `--name string`: Required service name.
+- `--name string`: Required (scripted mode) service name.
 - `--package string`: Package name for the generated Go code. Default: `dash.v1`.
 - `--mod string`: Go module path for generated imports. Default: `github.com/go-sphere/sphere-layout`.
+- `--out string`: Write the generated code to this file instead of stdout.
 
 **Prerequisites.** The generated skeleton calls APIs produced by the project's
 own code generators (`entbind.CreateXxx`, `ent.Xxx.Create`, `s.render.Xxx`), so
@@ -160,12 +188,13 @@ Performs a project-wide rename of the Go module path.
 **Usage:**
 
 ```shell
+sphere-cli rename                     # interactive wizard in a terminal
 sphere-cli rename --old <old-module> --new <new-module> [--target <directory>]
 ```
 
 **Flags:**
 
-- `--old string`: Required current Go module path.
+- `--old string`: Current Go module path. Optional: detected from `go.mod` in the target directory when omitted.
 - `--new string`: Required new Go module path.
 - `--target string`: Root directory of the project to rename. Default: `.`.
 

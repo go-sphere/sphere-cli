@@ -8,11 +8,32 @@ import (
 	"go/printer"
 	"go/token"
 	"io/fs"
-	"log"
 	"os"
 	"path/filepath"
 	"strings"
 )
+
+// ModulePath reads the module directive from the go.mod file in dir. It
+// returns an error when dir has no readable go.mod or the directive is
+// missing, so callers can fall back to asking the user.
+func ModulePath(dir string) (string, error) {
+	content, err := os.ReadFile(filepath.Join(dir, "go.mod"))
+	if err != nil {
+		return "", err
+	}
+	for _, line := range strings.Split(string(content), "\n") {
+		trimmed := strings.TrimSpace(line)
+		if !strings.HasPrefix(trimmed, "module ") {
+			continue
+		}
+		fields := strings.Fields(trimmed)
+		if len(fields) < 2 {
+			return "", fmt.Errorf("invalid module directive in %s", filepath.Join(dir, "go.mod"))
+		}
+		return strings.Trim(fields[1], `"`), nil
+	}
+	return "", errors.New("module directive not found in go.mod")
+}
 
 func RenameDirModule(oldModule, newModule string, dir string) error {
 	err := filepath.WalkDir(dir, func(path string, d fs.DirEntry, err error) error {
@@ -53,8 +74,7 @@ func RenameModule(oldModule, newModule string, path string) error {
 	files := token.NewFileSet()
 	node, err := parser.ParseFile(files, path, nil, parser.ParseComments)
 	if err != nil {
-		log.Printf("parse file error: %v", err)
-		return err
+		return fmt.Errorf("parse %s: %w", path, err)
 	}
 	ast.Inspect(node, func(n ast.Node) bool {
 		importSpec, ok := n.(*ast.ImportSpec)
@@ -72,16 +92,14 @@ func RenameModule(oldModule, newModule string, path string) error {
 	})
 	file, err := os.OpenFile(path, os.O_WRONLY|os.O_TRUNC, 0o644)
 	if err != nil {
-		log.Printf("open file error: %v", err)
-		return err
+		return fmt.Errorf("open %s: %w", path, err)
 	}
 	defer func() {
 		_ = file.Close()
 	}()
 	err = printer.Fprint(file, files, node)
 	if err != nil {
-		log.Printf("write file error: %v", err)
-		return err
+		return fmt.Errorf("write %s: %w", path, err)
 	}
 	return nil
 }

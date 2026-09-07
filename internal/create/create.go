@@ -1,15 +1,18 @@
 package create
 
 import (
+	"bufio"
 	"encoding/json"
 	"errors"
 	"fmt"
+	"io"
 	"io/fs"
-	"log"
 	"net/http"
 	"os"
 	"os/exec"
 	"path/filepath"
+	"sort"
+	"strconv"
 	"strings"
 	"syscall"
 	"time"
@@ -75,11 +78,86 @@ var templateLayouts = map[string]*TemplateLayout{
 	},
 }
 
+// BuiltInLayouts returns the layouts compiled into the CLI. The interactive
+// wizard falls back to this list when the remote layout list is unreachable.
+func BuiltInLayouts() []*LayoutItem {
+	names := make([]string, 0, len(templateLayouts))
+	for name := range templateLayouts {
+		if name == "" {
+			continue
+		}
+		names = append(names, name)
+	}
+	sort.Strings(names)
+	items := make([]*LayoutItem, 0, len(names))
+	for _, name := range names {
+		items = append(items, &LayoutItem{Name: name, Description: "Built-in layout"})
+	}
+	return items
+}
+
+// Options describes a project creation run. Name and Module are required,
+// Layout may be nil to select the default layout, and the boolean switches
+// control the optional post-scaffold steps.
+type Options struct {
+	Name     string
+	Module   string
+	Layout   *TemplateLayout
+	InitGit  bool
+	InitDeps bool
+}
+
+// ProgressEvent reports what the creation pipeline is currently doing. The
+// interactive UI renders it as an overall progress bar; the CLI prints it as
+// plain log lines.
+type ProgressEvent struct {
+	// Step is the zero-based index of the current pipeline step.
+	Step int
+	// TotalSteps is the number of steps in the pipeline.
+	TotalSteps int
+	// Label is a human-readable description of the current step.
+	Label string
+	// Percent is the progress inside the current step, 0..1. Negative values
+	// mean the step has no measurable progress (spinner only).
+	Percent float64
+	// Detail is the most recent command or status line of the current step.
+	Detail string
+	// Done marks the whole pipeline as finished.
+	Done bool
+}
+
+// Reporter receives progress events; it must be safe for concurrent use.
+type Reporter func(ProgressEvent)
+
+const (
+	stepDownload = iota
+	stepRenameModule
+	stepWriteLock
+	stepInitGit
+	stepInstallDeps
+	stepMoveOutput
+	stepCount
+)
+
+// Project creates a project with default options: git init and dependency
+// installation enabled. It is kept for scripted usage and tests.
 func Project(name, mod string, layout *TemplateLayout) error {
-	if err := validateLayout(layout); err != nil {
+	return Create(Options{
+		Name:     name,
+		Module:   mod,
+		Layout:   layout,
+		InitGit:  true,
+		InitDeps: true,
+	}, nil)
+}
+
+// Create runs the full project creation pipeline, reporting progress through
+// the optional reporter.
+func Create(opts Options, report Reporter) error {
+	if err := validateLayout(opts.Layout); err != nil {
 		return fmt.Errorf("invalid layout: %w", err)
 	}
-	targetDir, err := filepath.Abs(filepath.Join(".", name))
+	targetDir, err := filepath.Abs(filepath.Join(".", opts.Name))
 	if err != nil {
 		return err
 	}
@@ -87,36 +165,81 @@ func Project(name, mod string, layout *TemplateLayout) error {
 		return fmt.Errorf("target directory already exists: %s", targetDir)
 	}
 
-	layoutDir, cleanup, revision, err := materializeLayout(layout)
+	emit := func(step int, label string, percent float64, detail string) {
+		if report == nil {
+			return
+		}
+		report(ProgressEvent{Step: step, TotalSteps: stepCount, Label: label, Percent: percent, Detail: detail})
+	}
+
+	layoutDir, cleanup, revision, err := materializeLayout(opts.Layout, func(percent float64, detail string) {
+		emit(stepDownload, "Downloading template", percent, detail)
+	})
 	if err != nil {
 		return err
 	}
 	defer cleanup()
+	emit(stepDownload, "Downloading template", 1, "")
 
-	err = renameGoModule(layout.Mod, mod, layoutDir)
-	if err != nil {
+	emit(stepRenameModule, "Renaming Go module", -1, opts.Module)
+	if err := renameGoModule(opts.Layout.Mod, opts.Module, layoutDir); err != nil {
 		return err
 	}
+	emit(stepRenameModule, "Renaming Go module", 1, "")
 
 	if revision != "" {
-		if err := writeLayoutLock(layoutDir, layout, revision); err != nil {
+		emit(stepWriteLock, "Recording template revision", -1, revision[:min(12, len(revision))])
+		if err := writeLayoutLock(layoutDir, opts.Layout, revision); err != nil {
 			return err
 		}
 	}
+	emit(stepWriteLock, "Recording template revision", 1, "")
 
-	if err := initGitRepo(layoutDir); err != nil {
-		return err
+	if opts.InitGit {
+		emit(stepInitGit, "Initializing git repository", -1, "git init")
+		if err := ensureGitIdentity(); err != nil {
+			return err
+		}
+		if err := execCommands(layoutDir, nil, []string{"git", "init"}); err != nil {
+			return err
+		}
+		emit(stepInitGit, "Initializing git repository", 1, "")
 	}
 
-	err = moveTempDirToTarget(layoutDir, targetDir)
-	if err != nil {
-		return err
+	if opts.InitDeps {
+		emit(stepInstallDeps, "Installing dependencies", -1, "make init")
+		if err := installDependencies(layoutDir); err != nil {
+			return err
+		}
+		emit(stepInstallDeps, "Installing dependencies", 1, "")
 	}
 
+	// Commit last so files produced by dependency installation are included in
+	// the initial commit.
+	if opts.InitGit {
+		emit(stepInitGit, "Creating initial commit", 0.5, "git add .")
+		if err := execCommands(layoutDir, nil,
+			[]string{"git", "add", "."},
+			[]string{"git", "commit", "-m", "feat: Initial commit"},
+		); err != nil {
+			return err
+		}
+		emit(stepInitGit, "Creating initial commit", 1, "")
+	}
+
+	emit(stepMoveOutput, "Writing project files", -1, targetDir)
+	if err := moveTempDirToTarget(layoutDir, targetDir); err != nil {
+		return err
+	}
+	emit(stepMoveOutput, "Writing project files", 1, "")
+
+	if report != nil {
+		report(ProgressEvent{Step: stepCount, TotalSteps: stepCount, Done: true})
+	}
 	return nil
 }
 
-func materializeLayout(layout *TemplateLayout) (string, func(), string, error) {
+func materializeLayout(layout *TemplateLayout, onProgress func(percent float64, detail string)) (string, func(), string, error) {
 	if layout.Source != "" {
 		tempDir, err := os.MkdirTemp("", "sphere-layout-")
 		if err != nil {
@@ -124,11 +247,11 @@ func materializeLayout(layout *TemplateLayout) (string, func(), string, error) {
 		}
 		cleanup := func() { _ = os.RemoveAll(tempDir) }
 		layoutDir := filepath.Join(tempDir, "layout")
-		if _, err := execCommand(tempDir, "git", "clone", "--depth", "1", "--single-branch", "--branch", layout.Ref, layout.Source, layoutDir); err != nil {
+		if _, err := cloneRepository(layout.Source, layout.Ref, tempDir, layoutDir, onProgress); err != nil {
 			cleanup()
 			return "", func() {}, "", err
 		}
-		revision, err := execCommand(layoutDir, "git", "rev-parse", "HEAD")
+		revision, err := execCommand(layoutDir, nil, "git", "rev-parse", "HEAD")
 		if err != nil {
 			cleanup()
 			return "", func() {}, "", err
@@ -145,6 +268,103 @@ func materializeLayout(layout *TemplateLayout) (string, func(), string, error) {
 		return "", func() {}, "", err
 	}
 	return filepath.Join(tempDir, layout.Path), func() { _ = os.RemoveAll(tempDir) }, "", nil
+}
+
+// cloneRepository clones source at ref into layoutDir, streaming git progress
+// to onProgress as a 0..1 percentage.
+func cloneRepository(source, ref, dir, layoutDir string, onProgress func(percent float64, detail string)) (string, error) {
+	args := []string{"clone", "--depth", "1", "--single-branch", "--branch", ref}
+	if onProgress != nil {
+		args = append(args, "--progress")
+	}
+	args = append(args, source, layoutDir)
+
+	cmd := exec.Command("git", args...)
+	cmd.Dir = dir
+	stdout := &strings.Builder{}
+	cmd.Stdout = stdout
+	stderrPipe, err := cmd.StderrPipe()
+	if err != nil {
+		return "", err
+	}
+	if err := cmd.Start(); err != nil {
+		return "", err
+	}
+	if onProgress != nil {
+		reader := bufio.NewReader(stderrPipe)
+		for {
+			line, err := reader.ReadString('\n')
+			for _, part := range strings.Split(strings.TrimRight(line, "\r\n"), "\r") {
+				if phase, percent, ok := ParseGitProgress(part); ok {
+					onProgress(percent, phase)
+				}
+			}
+			if err != nil {
+				break
+			}
+		}
+	} else {
+		_, _ = io.Copy(io.Discard, stderrPipe)
+	}
+	if err := cmd.Wait(); err != nil {
+		return stdout.String(), err
+	}
+	return stdout.String(), nil
+}
+
+// ParseGitProgress extracts a phase name and normalized 0..1 progress from a
+// git clone progress line such as "Receiving objects:  45% (123/273)".
+// Cloning weighs 2%, receiving 83%, resolving deltas 10%, and updating files
+// the remaining 5%.
+func ParseGitProgress(line string) (string, float64, bool) {
+	phases := []struct {
+		name  string
+		lo    float64
+		span  float64
+		scale float64
+	}{
+		{name: "Cloning", lo: 0.00, span: 0.02, scale: 1},
+		{name: "Receiving objects", lo: 0.02, span: 0.83, scale: 1},
+		{name: "Resolving deltas", lo: 0.85, span: 0.10, scale: 1},
+		{name: "Checking objects", lo: 0.85, span: 0.10, scale: 1},
+		{name: "Updating files", lo: 0.95, span: 0.05, scale: 1},
+		{name: "Checking out files", lo: 0.95, span: 0.05, scale: 1},
+	}
+	for _, phase := range phases {
+		rest, ok := cutPrefix(line, phase.name+":")
+		if !ok {
+			continue
+		}
+		percent, ok := leadingPercent(rest)
+		if !ok {
+			return phase.name, phase.lo, true
+		}
+		return phase.name, phase.lo + phase.span*(percent/100), true
+	}
+	if strings.HasPrefix(line, "remote:") {
+		return "Contacting remote", 0.01, true
+	}
+	return "", 0, false
+}
+
+func cutPrefix(s, prefix string) (string, bool) {
+	if !strings.HasPrefix(s, prefix) {
+		return "", false
+	}
+	return strings.TrimPrefix(s, prefix), true
+}
+
+func leadingPercent(s string) (float64, bool) {
+	s = strings.TrimSpace(s)
+	percentIndex := strings.IndexByte(s, '%')
+	if percentIndex < 0 {
+		return 0, false
+	}
+	value, err := strconv.ParseFloat(strings.TrimSpace(s[:percentIndex]), 64)
+	if err != nil {
+		return 0, false
+	}
+	return value, true
 }
 
 func writeLayoutLock(layoutDir string, layout *TemplateLayout, revision string) error {
@@ -196,6 +416,25 @@ func Layout(nameOrUri string) (*TemplateLayout, error) {
 	return &layout, nil
 }
 
+// ValidateProjectName rejects names that would create the project outside the
+// current directory or silently produce a different directory than the name
+// the user typed (path separators, "." / ".." traversal, stray whitespace).
+func ValidateProjectName(name string) error {
+	if strings.TrimSpace(name) == "" {
+		return errors.New("project name must not be empty or whitespace")
+	}
+	if name != strings.TrimSpace(name) {
+		return errors.New("project name must not start or end with whitespace")
+	}
+	if strings.ContainsAny(name, `/\`) {
+		return errors.New("project name must be a single directory name without path separators")
+	}
+	if name == "." || name == ".." {
+		return errors.New("project name must not be '.' or '..'")
+	}
+	return nil
+}
+
 func validateLayout(layout *TemplateLayout) error {
 	if layout == nil || layout.Mod == "" {
 		return errors.New("missing module")
@@ -232,6 +471,17 @@ func LayoutList() ([]*LayoutItem, error) {
 		return nil, err
 	}
 	return layouts, nil
+}
+
+// LayoutListWithFallback returns the remote layout list, falling back to the
+// built-in layouts when the remote list is unreachable. The second result
+// reports whether the remote list was used.
+func LayoutListWithFallback() ([]*LayoutItem, bool, error) {
+	layouts, err := LayoutList()
+	if err == nil && len(layouts) > 0 {
+		return layouts, true, nil
+	}
+	return BuiltInLayouts(), false, nil
 }
 
 // moveTempDirToTarget moves source onto target. Layouts are materialized under
@@ -285,64 +535,73 @@ func copyDirContents(source, target string) error {
 	})
 }
 
-func initGitRepo(target string) error {
-	if err := ensureGitIdentity(); err != nil {
-		return err
-	}
-	return execCommands(target,
-		[]string{"git", "init"},
-		[]string{"git", "add", "."},
-		[]string{"git", "commit", "-m", "feat: Initial commit"},
-	)
-}
-
 // ensureGitIdentity verifies that a commit identity is available before any
 // commit is attempted, so users without a configured git identity get a clear
 // message instead of an obscure failure from `git commit`.
 func ensureGitIdentity() error {
-	if _, err := execCommand("", "git", "var", "GIT_COMMITTER_IDENT"); err != nil {
+	if _, err := execCommand("", nil, "git", "var", "GIT_COMMITTER_IDENT"); err != nil {
 		return errors.New("git commit identity is not configured: set git user.name and user.email, or export GIT_AUTHOR_NAME/GIT_AUTHOR_EMAIL and GIT_COMMITTER_NAME/GIT_COMMITTER_EMAIL")
 	}
 	return nil
 }
 
 func renameGoModule(oldModName, newModName, target string) error {
-	log.Printf("rename module: %s -> %s", oldModName, newModName)
 	if err := renamer.RenameProjectModule(oldModName, newModName, target, []string{
 		"buf.gen.yaml",
 		"buf.binding.yaml",
 	}, true); err != nil {
 		return err
 	}
-	err := execCommands(target,
-		[]string{"go", "mod", "edit", "-module", newModName},
+	_, err := execCommand(target, nil, "go", "mod", "edit", "-module", newModName)
+	return err
+}
+
+func installDependencies(target string) error {
+	return execCommands(target, nil,
 		[]string{"make", "init"},
 		[]string{"go", "mod", "tidy"},
 		[]string{"go", "fmt", "./..."},
 	)
-	if err != nil {
-		return err
-	}
-	return nil
 }
 
-func execCommand(dir string, name string, arg ...string) (string, error) {
-	log.Println(name, strings.Join(arg, " "))
+// execCommand runs a command quietly, capturing stdout for the caller and
+// stderr for error reporting. Optional onOutput receives progress lines.
+func execCommand(dir string, onDetail func(string), name string, arg ...string) (string, error) {
 	cmd := exec.Command(name, arg...)
 	cmd.Dir = dir
 	var stdout strings.Builder
+	var stderr strings.Builder
 	cmd.Stdout = &stdout
-	cmd.Stderr = os.Stderr
+	cmd.Stderr = &stderr
 	if err := cmd.Run(); err != nil {
-		return stdout.String(), err
+		message := strings.TrimSpace(stderr.String())
+		if message == "" {
+			message = strings.TrimSpace(stdout.String())
+		}
+		if message != "" {
+			return stdout.String(), fmt.Errorf("%s %s: %w\n%s", name, strings.Join(arg, " "), err, message)
+		}
+		return stdout.String(), fmt.Errorf("%s %s: %w", name, strings.Join(arg, " "), err)
+	}
+	if onDetail != nil {
+		if line := lastNonEmptyLine(stdout.String()); line != "" {
+			onDetail(line)
+		}
 	}
 	return stdout.String(), nil
 }
 
-func execCommands(dir string, commands ...[]string) error {
+func lastNonEmptyLine(text string) string {
+	text = strings.TrimRight(text, "\n\r \t")
+	if index := strings.LastIndexAny(text, "\n"); index >= 0 {
+		return text[index+1:]
+	}
+	return text
+}
+
+func execCommands(dir string, onDetail func(string), commands ...[]string) error {
 	for _, cmd := range commands {
-		_, err := execCommand(dir, cmd[0], cmd[1:]...)
-		if err != nil {
+		if _, err := execCommand(dir, onDetail, cmd[0], cmd[1:]...); err != nil {
 			return err
 		}
 	}
