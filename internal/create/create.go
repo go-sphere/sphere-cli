@@ -277,7 +277,7 @@ func cloneRepository(source, ref, dir, layoutDir string, onProgress func(percent
 	if onProgress != nil {
 		args = append(args, "--progress")
 	}
-	args = append(args, source, layoutDir)
+	args = append(args, "--", source, layoutDir)
 
 	cmd := exec.Command("git", args...)
 	cmd.Dir = dir
@@ -443,10 +443,18 @@ func validateLayout(layout *TemplateLayout) error {
 		if layout.Name == "" || layout.Ref == "" {
 			return errors.New("git layouts require name and ref")
 		}
+		// A leading "-" would be parsed by git as an option, not a repository.
+		if strings.HasPrefix(layout.Source, "-") {
+			return errors.New("git layout source must not start with '-'")
+		}
 		return nil
 	}
 	if layout.URI == "" || layout.Path == "" {
 		return errors.New("zip layouts require uri and path")
+	}
+	// Path is joined onto the extraction directory; it must stay inside it.
+	if !filepath.IsLocal(layout.Path) {
+		return errors.New("zip layout path must be a relative path inside the archive")
 	}
 	return nil
 }

@@ -392,3 +392,25 @@ func TestCopyDirContentsPreservesFilesDirsAndSymlinks(t *testing.T) {
 		}
 	}
 }
+
+func TestValidateLayoutRejectsUnsafeFields(t *testing.T) {
+	tests := []struct {
+		name   string
+		layout TemplateLayout
+	}{
+		{"zip path escapes", TemplateLayout{Mod: "m", URI: "https://x/a.zip", Path: "../../etc"}},
+		{"zip path absolute", TemplateLayout{Mod: "m", URI: "https://x/a.zip", Path: "/etc"}},
+		{"git source is option", TemplateLayout{Mod: "m", Name: "n", Ref: "main", Source: "--upload-pack=touch /tmp/x"}},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			if err := validateLayout(&tt.layout); err == nil {
+				t.Fatal("validateLayout error = nil, want error")
+			}
+		})
+	}
+	ok := TemplateLayout{Mod: "m", URI: "https://x/a.zip", Path: "sphere-layout-master"}
+	if err := validateLayout(&ok); err != nil {
+		t.Fatalf("validateLayout(valid zip) error = %v", err)
+	}
+}
