@@ -40,7 +40,9 @@ func RenameDirModule(oldModule, newModule string, dir string) error {
 		if err != nil {
 			return err
 		}
-		if d.IsDir() {
+		// Symlinks are skipped: a layout from an untrusted source could point
+		// one outside the project, and rewriting it would edit that target.
+		if d.IsDir() || d.Type()&fs.ModeSymlink != 0 {
 			return nil
 		}
 		if strings.HasSuffix(path, ".go") {
@@ -105,6 +107,9 @@ func RenameModule(oldModule, newModule string, path string) error {
 }
 
 func renameGoModuleFile(oldModule, newModule, modPath string) error {
+	if isSymlink(modPath) {
+		return fmt.Errorf("go.mod must not be a symlink: %s", modPath)
+	}
 	content, err := os.ReadFile(modPath)
 	if err != nil {
 		if errors.Is(err, os.ErrNotExist) {
@@ -139,11 +144,21 @@ func renameGoModuleFile(oldModule, newModule, modPath string) error {
 	return os.WriteFile(modPath, []byte(strings.Join(lines, "\n")), 0o644)
 }
 
+// replaceFileContent replaces old with new in filePath. Symlinks are left
+// untouched for the same reason RenameDirModule skips them.
 func replaceFileContent(old, new, filePath string) error {
+	if isSymlink(filePath) {
+		return nil
+	}
 	content, err := os.ReadFile(filePath)
 	if err != nil {
 		return err
 	}
 	replaced := strings.ReplaceAll(string(content), old, new)
 	return os.WriteFile(filePath, []byte(replaced), 0o644)
+}
+
+func isSymlink(path string) bool {
+	info, err := os.Lstat(path)
+	return err == nil && info.Mode()&fs.ModeSymlink != 0
 }

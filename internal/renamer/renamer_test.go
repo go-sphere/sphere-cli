@@ -110,3 +110,40 @@ func TestRenameProjectModuleGoModMismatch(t *testing.T) {
 		t.Fatalf("RenameDirModule() error = %v, want go.mod mismatch", err)
 	}
 }
+
+func TestRenameProjectModuleSkipsSymlinks(t *testing.T) {
+	dir := t.TempDir()
+	outside := t.TempDir()
+	victimGo := filepath.Join(outside, "victim.go")
+	victimYAML := filepath.Join(outside, "victim.yaml")
+	const goSrc = "package victim\n\nimport _ \"github.com/a/foo/x\"\n"
+	const yamlSrc = "module: github.com/a/foo\n"
+	for path, content := range map[string]string{
+		victimGo:                     goSrc,
+		victimYAML:                   yamlSrc,
+		filepath.Join(dir, "go.mod"): "module github.com/a/foo\n",
+	} {
+		if err := os.WriteFile(path, []byte(content), 0o644); err != nil {
+			t.Fatalf("write %s: %v", path, err)
+		}
+	}
+	if err := os.Symlink(victimGo, filepath.Join(dir, "link.go")); err != nil {
+		t.Fatalf("symlink: %v", err)
+	}
+	if err := os.Symlink(victimYAML, filepath.Join(dir, "buf.gen.yaml")); err != nil {
+		t.Fatalf("symlink: %v", err)
+	}
+
+	if err := RenameProjectModule("github.com/a/foo", "example.com/n", dir, []string{"buf.gen.yaml"}, false); err != nil {
+		t.Fatalf("RenameProjectModule error = %v", err)
+	}
+	for path, want := range map[string]string{victimGo: goSrc, victimYAML: yamlSrc} {
+		got, err := os.ReadFile(path)
+		if err != nil {
+			t.Fatalf("read %s: %v", path, err)
+		}
+		if string(got) != want {
+			t.Errorf("%s was rewritten through a symlink:\n%s", path, got)
+		}
+	}
+}
